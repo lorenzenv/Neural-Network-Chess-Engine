@@ -47,9 +47,9 @@ The model consists of *7 layers.* Two input layers, two hidden layers extracting
 
 The Tensorflow structure looks as follows:
 
-![tensorflow-model1](https://i.ibb.co/0qsDds7/st.png)
+![tensorflow-model1](img/model_structure1.png)
 
-![tensorflow-model1](https://i.ibb.co/3zYSJJP/index.png)
+![tensorflow-model1](img/model_structure2.png)
 
 Four *dropout layers* were additionally used for adding noise to the training-process to prevent overfitting as well as *L2 Kernal-Regulization* at each layer. All layers, except the output layer, were activated through a *Rectified Linear Unit (ReLu) - activation.*
 
