@@ -7,13 +7,13 @@ It is fairly basic and makes a lot of mistakes, especially at the beginning of t
 
 See if you can beat it and read up on how it was created below. 
 
-Tech-Stack:
+####Tech-Stack:
 
 - Tensorflow/Keras
 - Flask
 - CSS/Javascript/Python/HTML
 
-Resources:
+####Resources:
 DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess
 by Omid E. David, Nathan S. Netanyahu, and Lior Wolf
 
@@ -26,7 +26,7 @@ by Niklas Fiekas
 chessboard.js
 by Chris Oakman
 
-Tensorflow Model:
+####Tensorflow Model:
 The engine is trained on the *CCRL computer chess database* consisting of 1'450'489 chess games. From those games 2'000'000 positions were extracted at random, 50% from games that white won at the end and 50% from games that black won at the end of the game.
 
 The positions were first converted into the commonly used *FEN* format and then transformed into a *Bitboard - 769 bit* representation.
@@ -49,7 +49,7 @@ Four *dropout layers* were additionally used for adding noise to the training-pr
 The model reached a *validation accuracy of 87%* through 300 epochs of training with a Learning Rate that started at 0.001 and was multiplied by 0.99 at each epoch.
 
 
-Things to improve:
+####Things to improve:
 
 - Implement an autoencoder structure
 
