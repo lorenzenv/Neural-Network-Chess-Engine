@@ -14,19 +14,19 @@ See if you can beat it and read up on how it was created below.
 - CSS/Javascript/Python/HTML
 
 #### Resources:
-* [DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess](https://www.google.com)
+* [DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess](https://www.cs.tau.ac.il/~wolf/papers/deepchess.pdf)
 *by Omid E. David, Nathan S. Netanyahu, and Lior Wolf*
 
-* A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"
+* [A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"](https://github.com/oripress/DeepChess)
 *by oripress*
 
-* python-chess: a chess library for Python
+* [python-chess: a chess library for Python](https://python-chess.readthedocs.io/)
 *by Niklas Fiekas*
 
-* chessboard.js
+* [chessboard.js](https://chessboardjs.com/)
 *by Chris Oakman*
 
-* FlaskChess
+* [FlaskChess3](https://github.com/brokenloop/FlaskChess/)
 *by brokenloop*
 
 #### Tensorflow Model:
