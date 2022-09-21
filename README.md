@@ -14,7 +14,7 @@ See if you can beat it and read up on how it was created below.
 - CSS/Javascript/Python/HTML
 
 #### Resources:
-[* DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess](https://www.google.com)
+* [DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess](https://www.google.com)
 *by Omid E. David, Nathan S. Netanyahu, and Lior Wolf*
 
 * A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"
