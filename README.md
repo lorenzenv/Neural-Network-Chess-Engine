@@ -68,3 +68,11 @@ The model reached a *validation accuracy of 87%* through 300 epochs of training 
 - Improved Alpha-Beta Search
 
 - Write custom training loop for better hyperparameter optimization
+
+---
+
+#### Files:
+
+- [`train.py`](train.py): Train the A.I
+- [`chess_engine.py`](chess_engine.py): Evaluating and chosing a move
+- [`app.py`](app.py): Flask app
