@@ -7,7 +7,7 @@ app = Flask(__name__)
 def index():
     return render_template("index.html")
 
-
+# got the idea from https://github.com/brokenloop/FlaskChess/blob/master/flask_app.py
 @app.route('/move/<int:depth>/<path:fen>')
 def get_move(depth, fen):
     engine = Engine(fen)
