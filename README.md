@@ -14,17 +14,20 @@ See if you can beat it and read up on how it was created below.
 - CSS/Javascript/Python/HTML
 
 #### Resources:
-DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess
+⋅⋅⋅DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess
 by Omid E. David, Nathan S. Netanyahu, and Lior Wolf
 
-A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"
+⋅⋅⋅A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"
 by oripress
 
-python-chess: a chess library for Python
+⋅⋅⋅python-chess: a chess library for Python
 by Niklas Fiekas
 
-chessboard.js
+⋅⋅⋅chessboard.js
 by Chris Oakman
+
+⋅⋅⋅FlaskChess
+by brokenloop
 
 #### Tensorflow Model:
 The engine is trained on the *CCRL computer chess database* consisting of 1'450'489 chess games. From those games 2'000'000 positions were extracted at random, 50% from games that white won at the end and 50% from games that black won at the end of the game.
