@@ -6,13 +6,13 @@ This Chess Engine was created in one week as the final project of the *2022 Spic
 It is fairly basic and makes a lot of mistakes, especially at the beginning of the game. It is currently running at a depth of two moves, meaning it calculates two moves into the future. Higher depth would require longer calculation time or a more efficient Alpha-Beta pruning search.
 
 See if you can beat it and read up on how it was created below. 
-
+---
 #### Tech-Stack:
 
 - Tensorflow/Keras
 - Flask
 - CSS/Javascript/Python/HTML
-
+---
 #### Resources:
 * [DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess](https://www.cs.tau.ac.il/~wolf/papers/deepchess.pdf)
 *by Omid E. David, Nathan S. Netanyahu, and Lior Wolf*
@@ -26,9 +26,9 @@ See if you can beat it and read up on how it was created below.
 * [chessboard.js](https://chessboardjs.com/)
 *by Chris Oakman*
 
-* [FlaskChess3](https://github.com/brokenloop/FlaskChess/)
+* [FlaskChess](https://github.com/brokenloop/FlaskChess/)
 *by brokenloop*
-
+---
 #### Tensorflow Model:
 The engine is trained on the *CCRL computer chess database* consisting of 1'450'489 chess games. From those games 2'000'000 positions were extracted at random, 50% from games that white won at the end and 50% from games that black won at the end of the game.
 
@@ -50,8 +50,7 @@ Four *dropout layers* were additionally used for adding noise to the training-pr
 "Adam" was chosen as the optimzier as well as *Binary Crossentropy* as the loss-function.
 
 The model reached a *validation accuracy of 87%* through 300 epochs of training with a Learning Rate that started at 0.001 and was multiplied by 0.99 at each epoch.
-
-
+---
 #### Things to improve:
 
 - Implement an autoencoder structure
