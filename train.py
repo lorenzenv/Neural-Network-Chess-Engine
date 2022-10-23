@@ -191,7 +191,7 @@ def train_model(model, epochs, starting_lr, lr_mp):
 
 	lr = starting_lr
 
-	for i in range(epochs):
+	for epoch in range(epochs):
 		# shuffle training data
 		WWinning_t = np.random.permutation(WWinning_t)
 		BWinning_t = np.random.permutation(BWinning_t)
@@ -203,7 +203,7 @@ def train_model(model, epochs, starting_lr, lr_mp):
 		print (model.optimizer.lr)
 		# split training into 39 * 25,000 datapoints
 		for j in range(0, 39, 1):
-			print ("Outer Epoch #", i, "\nInner Epoch #", j)
+			print ("Outer Epoch #", epoch, "\nInner Epoch #", j)
 			# get training data
 			X, y = get_batch(j*25000, 25000, False)
 			# get test data
