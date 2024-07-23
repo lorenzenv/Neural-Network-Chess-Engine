@@ -2,3 +2,4 @@ flask
 chess
 tflite-runtime
 numpy
+gunicorn
