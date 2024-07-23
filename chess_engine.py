@@ -1,30 +1,30 @@
 import chess
 import numpy as np
-import tensorflow as tf
+import tflite_runtime.interpreter as tflite
 from util import *
 
 # load model
-interpreter = tf.lite.Interpreter(model_path="model.tflite")
+interpreter = tflite.Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 # create X
 def make_x(first,second):
-	x_1 = make_bitboard(beautifyFEN(first))
-	x_2 = make_bitboard(beautifyFEN(second))
-	x_1 = np.array(x_1, dtype=np.float32).reshape(1,769)
-	x_2 = np.array(x_2, dtype=np.float32).reshape(1,769)
-	return x_1, x_2
+    x_1 = make_bitboard(beautifyFEN(first))
+    x_2 = make_bitboard(beautifyFEN(second))
+    x_1 = np.array(x_1, dtype=np.float32).reshape(1,769)
+    x_2 = np.array(x_2, dtype=np.float32).reshape(1,769)
+    return x_1, x_2
 
 # evaluate two input positions
 def evaluate_pos(first, second):
-	x_1, x_2 = make_x(first,second)
-	interpreter.set_tensor(input_details[0]['index'], x_1)
-	interpreter.set_tensor(input_details[1]['index'], x_2)
-	interpreter.invoke()
-	evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
-	return evaluation
+    x_1, x_2 = make_x(first,second)
+    interpreter.set_tensor(input_details[0]['index'], x_1)
+    interpreter.set_tensor(input_details[1]['index'], x_2)
+    interpreter.invoke()
+    evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
+    return evaluation
 
 # create Engine class
 class Engine:
