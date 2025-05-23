@@ -4,14 +4,14 @@ import tflite_runtime.interpreter as tflite
 from util import *
 
 # Engine Version Information
-ENGINE_VERSION = "1.5"
-ENGINE_NAME = "Neural Chess Engine Improved"
+ENGINE_VERSION = "2.0"
+ENGINE_NAME = "Neural Chess Engine V2"
 ENGINE_FEATURES = [
-    "Move Ordering Optimization",
-    "Enhanced Position Caching", 
-    "Smart Capture Prioritization",
-    "Development Bonus System",
-    "50% Speed Improvement"
+    "Proper Alpha-Beta Pruning",
+    "Advanced Move Ordering", 
+    "Enhanced Position Caching",
+    "Tactical Awareness",
+    "Material Balance Detection"
 ]
 
 # load model
@@ -38,60 +38,83 @@ def evaluate_pos(first, second):
     return evaluation
 
 def order_moves(board, moves):
-    """Order moves to search better moves first (for alpha-beta pruning effectiveness)"""
+    """Advanced move ordering for better alpha-beta efficiency"""
     move_scores = []
     
     for move in moves:
         score = 0
         
-        # Prioritize captures
+        # High priority for captures (MVV-LVA)
         if board.piece_at(move.to_square) is not None:
             captured_piece = board.piece_at(move.to_square)
             moving_piece = board.piece_at(move.from_square)
             
             piece_values = {
-                chess.PAWN: 1,
-                chess.KNIGHT: 3,
-                chess.BISHOP: 3,
-                chess.ROOK: 5,
-                chess.QUEEN: 9,
-                chess.KING: 0
+                chess.PAWN: 100,
+                chess.KNIGHT: 320,
+                chess.BISHOP: 330,
+                chess.ROOK: 500,
+                chess.QUEEN: 900,
+                chess.KING: 20000
             }
             
-            # MVV-LVA (Most Valuable Victim - Least Valuable Attacker)
             if captured_piece and moving_piece:
-                score += piece_values.get(captured_piece.piece_type, 0) * 10
-                score -= piece_values.get(moving_piece.piece_type, 0)
+                # Most Valuable Victim - Least Valuable Attacker
+                victim_value = piece_values.get(captured_piece.piece_type, 0)
+                attacker_value = piece_values.get(moving_piece.piece_type, 100)
+                score += victim_value - (attacker_value // 10)
         
-        # Prioritize checks
+        # Very high priority for checks
         board.push(move)
         if board.is_check():
-            score += 50
+            score += 1000
+            # Even higher for checkmate
+            if board.is_checkmate():
+                score += 10000
         board.pop()
         
-        # Prioritize central moves
-        if move.to_square in [chess.E4, chess.E5, chess.D4, chess.D5]:
-            score += 20
+        # Promotion bonus
+        if move.promotion:
+            score += 800
         
-        # Prioritize piece development (off back rank)
+        # Central control bonus
+        if move.to_square in [chess.E4, chess.E5, chess.D4, chess.D5]:
+            score += 50
+        elif move.to_square in [chess.C3, chess.C6, chess.F3, chess.F6]:  # Extended center
+            score += 30
+        
+        # Development bonus for pieces moving off back rank
         if board.piece_at(move.from_square):
             piece = board.piece_at(move.from_square)
             if piece.color == chess.BLACK:
-                if chess.square_rank(move.from_square) == 7:  # Moving from back rank
-                    score += 15
+                from_rank = chess.square_rank(move.from_square)
+                to_rank = chess.square_rank(move.to_square)
+                
+                # Bonus for developing from back rank
+                if from_rank == 7 and piece.piece_type in [chess.KNIGHT, chess.BISHOP]:
+                    score += 40
+                
+                # Bonus for advancing pieces
+                if to_rank < from_rank:  # Moving forward
+                    score += 10
+        
+        # Castle bonus
+        if board.is_castling(move):
+            score += 60
         
         move_scores.append((score, move))
     
-    # Sort by score descending (highest score first)
+    # Sort by score descending
     move_scores.sort(key=lambda x: x[0], reverse=True)
     return [move for score, move in move_scores]
 
 # create Engine class
-class Engine:
+class EngineV2:
     def __init__(self, fen):
         self.board = chess.Board()
         self.board.set_fen(fen)
         self.position_cache = {}
+        self.nodes_searched = 0
 
     def get_version_info(self):
         """Return version information about this engine"""
@@ -106,85 +129,159 @@ class Engine:
         best_move = self.make_move()
         return str(best_move)
 
-    # get best move for black
+    # get best move for black with proper alpha-beta pruning
     def make_move(self):
-        current_fen_x = self.board.fen()
-        black_response = {}
-        print ("calculating\n")
+        self.nodes_searched = 0
+        current_fen = self.board.fen()
+        print("calculating\n")
         
-        # Order moves for better search
-        black_legal_moves = order_moves(self.board, list(self.board.legal_moves))
+        # Use alpha-beta search with proper bounds
+        best_move, best_score = self.alpha_beta_root(3, float('-inf'), float('inf'))
         
-        for black_move in black_legal_moves:
-            print (".")
-            white_response = {}
-            self.board.push(black_move)
+        if best_move is None:
+            legal_moves = list(self.board.legal_moves)
+            if legal_moves:
+                best_move = legal_moves[0]
+            else:
+                return "checkmate"
+        
+        print(f"best move found: {best_move} (score: {best_score:.2f}, nodes: {self.nodes_searched})")
+        return str(best_move)
+    
+    def alpha_beta_root(self, depth, alpha, beta):
+        """Root level alpha-beta search"""
+        legal_moves = order_moves(self.board, list(self.board.legal_moves))
+        
+        if not legal_moves:
+            return None, float('-inf')
+        
+        best_move = None
+        best_score = float('-inf')
+        
+        for move in legal_moves:
+            print(".")
+            self.board.push(move)
+            
+            # Check for immediate checkmate
             if self.board.is_checkmate():
                 self.board.pop()
-                return str(black_move)
+                return move, 10000
             
-            # Order white moves too
-            white_legal_moves = order_moves(self.board, list(self.board.legal_moves))
-            
-            for white_move in white_legal_moves:
-                self.board.push(white_move)
-                if self.board.is_checkmate():
-                    white_response[white_move] = 0
-                    self.board.pop()
-                    break
-                
-                black_legal_moves_depth_2 = order_moves(self.board, list(self.board.legal_moves))
-                black_response_depth_2 = {}
-                
-                for black_move_depth_2 in black_legal_moves_depth_2:
-                    self.board.push(black_move_depth_2)
-                    if self.board.is_checkmate():
-                        black_response_depth_2[black_move_depth_2] = 1
-                        self.board.pop()
-                        break
-                    
-                    next_fen_x = self.board.fen()
-                    if next_fen_x in self.position_cache:
-                        prediction_number = self.position_cache[next_fen_x]
-                    else:
-                        prediction_number = evaluate_pos(current_fen_x, next_fen_x)
-                        self.position_cache[next_fen_x] = prediction_number
-                    
-                    if len(white_response) > 0:
-                        if prediction_number > white_response[max(white_response, key=white_response.get)]:
-                            black_response_depth_2[black_move_depth_2] = prediction_number
-                            self.board.pop()
-                            break
-                        else:
-                            black_response_depth_2[black_move_depth_2] = prediction_number
-                            self.board.pop()
-                    else:
-                        black_response_depth_2[black_move_depth_2] = prediction_number
-                        self.board.pop()
-                
-                if len(black_response) > 0 and len(white_response) > 0:
-                    if white_response[min(white_response, key=white_response.get)] < black_response[max(black_response, key=black_response.get)]:
-                        white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
-                        self.board.pop()
-                        break
-                    else:
-                        if len(black_response_depth_2) > 0:
-                            white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
-                        self.board.pop()
-                else:
-                    if len(black_response_depth_2) > 0:
-                        white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
-                    self.board.pop()
-            
-            if len(white_response) > 0:
-                black_response[black_move] = white_response[min(white_response, key=white_response.get)]
+            # Search this move
+            score = self.alpha_beta(depth - 1, alpha, beta, False)
             self.board.pop()
+            
+            if score > best_score:
+                best_score = score
+                best_move = move
+            
+            alpha = max(alpha, score)
+            if beta <= alpha:
+                break  # Beta cutoff
         
-        if len(black_response) > 0:
-            best_move = max(black_response, key=black_response.get)
+        return best_move, best_score
+    
+    def alpha_beta(self, depth, alpha, beta, maximizing_player):
+        """Alpha-beta search with proper pruning"""
+        self.nodes_searched += 1
+        
+        # Terminal conditions
+        if self.board.is_checkmate():
+            if maximizing_player:
+                return float('-inf')  # Bad for maximizing player
+            else:
+                return float('inf')   # Good for minimizing player
+        
+        if self.board.is_stalemate() or self.board.is_insufficient_material():
+            return 0  # Draw
+        
+        if depth == 0:
+            return self.evaluate_position()
+        
+        legal_moves = order_moves(self.board, list(self.board.legal_moves))
+        
+        if maximizing_player:
+            max_eval = float('-inf')
+            for move in legal_moves:
+                self.board.push(move)
+                eval_score = self.alpha_beta(depth - 1, alpha, beta, False)
+                self.board.pop()
+                
+                max_eval = max(max_eval, eval_score)
+                alpha = max(alpha, eval_score)
+                
+                if beta <= alpha:
+                    break  # Beta cutoff
+            
+            return max_eval
         else:
-            print ("CHECKMATE")
-            return str("checkmate")
-
-        print ("best move found: ", best_move)
-        return str(best_move)
+            min_eval = float('inf')
+            for move in legal_moves:
+                self.board.push(move)
+                eval_score = self.alpha_beta(depth - 1, alpha, beta, True)
+                self.board.pop()
+                
+                min_eval = min(min_eval, eval_score)
+                beta = min(beta, eval_score)
+                
+                if beta <= alpha:
+                    break  # Alpha cutoff
+            
+            return min_eval
+    
+    def evaluate_position(self):
+        """Enhanced position evaluation"""
+        current_fen = self.board.fen()
+        
+        # Use cache if available
+        if current_fen in self.position_cache:
+            return self.position_cache[current_fen]
+        
+        # Get neural network evaluation
+        original_fen = self.board.fen()  # For now, use current position
+        nn_score = evaluate_pos(original_fen, current_fen)
+        
+        # Add tactical bonuses
+        tactical_bonus = 0
+        
+        # Check bonus/penalty
+        if self.board.is_check():
+            if self.board.turn == chess.WHITE:
+                tactical_bonus -= 50  # White is in check (bad for Black if we're Black)
+            else:
+                tactical_bonus += 50  # Black is in check (good for Black if we're White)
+        
+        # Material imbalance detection
+        material_score = self.calculate_material_advantage()
+        
+        # Combine scores
+        final_score = nn_score + (tactical_bonus * 0.1) + (material_score * 0.05)
+        
+        # Cache the result
+        self.position_cache[current_fen] = final_score
+        
+        return final_score
+    
+    def calculate_material_advantage(self):
+        """Calculate material advantage for Black"""
+        piece_values = {
+            chess.PAWN: 100,
+            chess.KNIGHT: 320,
+            chess.BISHOP: 330,
+            chess.ROOK: 500,
+            chess.QUEEN: 900,
+            chess.KING: 0
+        }
+        
+        black_material = 0
+        white_material = 0
+        
+        for piece_type in piece_values:
+            black_pieces = len(self.board.pieces(piece_type, chess.BLACK))
+            white_pieces = len(self.board.pieces(piece_type, chess.WHITE))
+            
+            piece_value = piece_values[piece_type]
+            black_material += black_pieces * piece_value
+            white_material += white_pieces * piece_value
+        
+        return black_material - white_material 
