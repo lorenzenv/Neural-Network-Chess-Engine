@@ -1,5 +1,5 @@
 flask
 chess
 tflite-runtime
-numpy
+numpy<2.0
 gunicorn
