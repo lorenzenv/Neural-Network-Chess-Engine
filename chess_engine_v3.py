@@ -1,11 +1,12 @@
 import chess
 import numpy as np
 import tflite_runtime.interpreter as tflite
+import random
 from util import *
 
 # Engine Version Information
-ENGINE_VERSION = "3.1"
-ENGINE_NAME = "Neural Chess Engine V3.1 - Speed Optimized"
+ENGINE_VERSION = "3.2"
+ENGINE_NAME = "Neural Chess Engine V3.2 - Anti-Repetition"
 ENGINE_FEATURES = [
     "Optimized Quiescence Search (faster tactical stability)",
     "Efficient Killer Move Heuristic", 
@@ -13,7 +14,9 @@ ENGINE_FEATURES = [
     "Fast Move Ordering",
     "Intelligent Position Caching with limits",
     "Quick Tactical Pattern Recognition",
-    "Speed-optimized evaluation"
+    "Speed-optimized evaluation",
+    "🆕 Three-fold Repetition Avoidance",
+    "🆕 Position History Tracking"
 ]
 
 # load model
@@ -171,6 +174,10 @@ class EngineV3:
         self.nodes_searched = 0
         self.killer_moves = [[] for _ in range(10)]  # Killer moves per depth
         self.cache_hits = 0
+        
+        # NEW: Position history tracking for repetition detection
+        self.position_history = []
+        self.initial_fen = fen
 
     def get_version_info(self):
         """Return version information about this engine"""
@@ -189,6 +196,11 @@ class EngineV3:
         self.cache_hits = 0
         current_fen = self.board.fen()
         print("calculating\n")
+        
+        # NEW: Add current position to history
+        current_position = current_fen.split(' ')[0]  # Just board position
+        if current_position not in self.position_history:
+            self.position_history.append(current_position)
         
         # Limit cache size for memory efficiency
         if len(self.position_cache) > 10000:
@@ -225,10 +237,19 @@ class EngineV3:
                 return "checkmate"
         
         print(f"🎯 best move: {best_move} (nodes: {self.nodes_searched}, cache hits: {self.cache_hits})")
+        
+        # NEW: Update position history with the chosen move
+        if best_move != "checkmate":
+            try:
+                move_obj = chess.Move.from_uci(str(best_move))
+                self.update_position_history(move_obj)
+            except:
+                pass  # If move conversion fails, skip history update
+        
         return str(best_move)
     
     def alpha_beta_root(self, depth, alpha, beta):
-        """Root level alpha-beta search with killer moves"""
+        """Root level alpha-beta search with killer moves and repetition avoidance"""
         killer_moves = self.killer_moves[0] if depth < len(self.killer_moves) else []
         legal_moves = order_moves_v3(self.board, list(self.board.legal_moves), killer_moves)
         
@@ -240,6 +261,16 @@ class EngineV3:
         
         for move in legal_moves:
             print(".")
+            
+            # NEW: Check for repetition and penalize heavily if we're in a good position
+            repetition_penalty = 0
+            if self.would_cause_repetition(move):
+                current_eval = self.evaluate_position()
+                # If we're winning (positive evaluation), heavily penalize repetition
+                if current_eval > 100:  # We have an advantage
+                    repetition_penalty = -500  # Large penalty to avoid draw in winning position
+                    print(f"⚠️  Repetition detected for {move}, penalty: {repetition_penalty}")
+            
             self.board.push(move)
             
             # Immediate checkmate
@@ -248,7 +279,13 @@ class EngineV3:
                 return move, 20000
             
             # Search this move
-            score = self.alpha_beta(depth - 1, alpha, beta, False, 1)
+            score = self.alpha_beta(depth - 1, alpha, beta, False, 1) + repetition_penalty
+            
+            # NEW: Add tiny random factor to break ties and avoid repetitive patterns
+            # This helps when multiple moves have similar evaluations
+            random_factor = random.uniform(-2, 2)  # Very small randomization
+            score += random_factor
+            
             self.board.pop()
             
             if score > best_score:
@@ -578,4 +615,29 @@ class EngineV3:
             if chess.square_rank(black_king) < 6:  # King too far forward
                 safety_score -= 30
         
-        return safety_score 
+        return safety_score
+
+    def would_cause_repetition(self, move):
+        """Check if a move would cause a position to repeat (leading to potential draw)"""
+        # Make the move temporarily
+        self.board.push(move)
+        current_position = self.board.fen().split(' ')[0]  # Just board position, ignore move counters
+        self.board.pop()
+        
+        # Count how many times this position has occurred
+        position_count = self.position_history.count(current_position)
+        
+        # If this would be the 2nd occurrence, we're one move away from three-fold repetition
+        return position_count >= 1
+    
+    def update_position_history(self, move):
+        """Update position history after making a move"""
+        self.board.push(move)
+        current_position = self.board.fen().split(' ')[0]  # Just board position
+        self.position_history.append(current_position)
+        
+        # Keep history manageable (last 20 positions should be enough)
+        if len(self.position_history) > 20:
+            self.position_history = self.position_history[-20:]
+        
+        self.board.pop() 
