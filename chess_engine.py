@@ -92,7 +92,7 @@ class Engine:
                 # No alpha cutoff at root for all moves, but beta helps ordering for future.
             return best_move_found
 
-    def alpha_beta_search(self, current_board, depth, alpha, beta, is_maximizing_player_for_eval, original_fen_for_eval):
+    def alpha_beta_search(self, current_board, depth, alpha, beta, is_maximizing_player_for_eval, parent_fen_for_eval):
         if current_board.is_game_over():
             if current_board.is_checkmate():
                 # current_board.turn is the player who IS mated.
@@ -101,24 +101,25 @@ class Engine:
                 else: # Black is mated (White delivered mate)
                     return CHECKMATE_POSITIVE_SCORE
             # For other game over conditions (stalemate, etc.), let the model evaluate.
-            # The evaluate_pos function compares original_fen_for_eval to current_board.fen()
+            # The evaluate_pos function compares parent_fen_for_eval to current_board.fen()
             # This will give a score from White's perspective.
-            return evaluate_pos(original_fen_for_eval, current_board.fen())
+            return evaluate_pos(parent_fen_for_eval, current_board.fen())
 
         if depth == 0:
-            return evaluate_pos(original_fen_for_eval, current_board.fen())
+            return evaluate_pos(parent_fen_for_eval, current_board.fen())
 
         legal_moves_ab = list(current_board.legal_moves)
         if not legal_moves_ab: # Should be caught by is_game_over, but as a safeguard
-             return evaluate_pos(original_fen_for_eval, current_board.fen())
+             return evaluate_pos(parent_fen_for_eval, current_board.fen())
 
+        fen_of_board_at_this_level = current_board.fen()
 
         if is_maximizing_player_for_eval: # White's turn in search tree (wants to maximize White's score)
             current_max_eval = float('-inf')
             for move in legal_moves_ab:
                 current_board.push(move)
                 # Next player (Black) is minimizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, False, original_fen_for_eval)
+                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, False, fen_of_board_at_this_level)
                 current_board.pop()
                 current_max_eval = max(current_max_eval, eval_score)
                 alpha = max(alpha, eval_score)
@@ -130,7 +131,7 @@ class Engine:
             for move in legal_moves_ab:
                 current_board.push(move)
                 # Next player (White) is maximizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, True, original_fen_for_eval)
+                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, True, fen_of_board_at_this_level)
                 current_board.pop()
                 current_min_eval = min(current_min_eval, eval_score)
                 beta = min(beta, eval_score)
