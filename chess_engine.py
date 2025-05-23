@@ -17,14 +17,22 @@ def make_x(first,second):
     x_2 = np.array(x_2, dtype=np.float32).reshape(1,769)
     return x_1, x_2
 
-# evaluate two input positions
-def evaluate_pos(first, second):
-    x_1, x_2 = make_x(first,second)
+# get raw model evaluation for two input positions
+def get_raw_model_evaluation(first_fen, second_fen):
+    x_1, x_2 = make_x(first_fen,second_fen)
     interpreter.set_tensor(input_details[0]['index'], x_1)
     interpreter.set_tensor(input_details[1]['index'], x_2)
     interpreter.invoke()
     evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
     return evaluation
+
+# evaluate two input positions, adjusting score based on whose turn it was in the first FEN
+def evaluate_pos(first_fen, second_fen):
+    raw_score = get_raw_model_evaluation(first_fen, second_fen)
+    board = chess.Board(first_fen)
+    if board.turn == chess.BLACK:
+        return -raw_score
+    return raw_score
 
 CHECKMATE_POSITIVE_SCORE = 9999
 CHECKMATE_NEGATIVE_SCORE = -9999
