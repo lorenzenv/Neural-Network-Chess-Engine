@@ -34,115 +34,114 @@ def evaluate_pos(first_fen, second_fen):
         return -raw_score
     return raw_score
 
-CHECKMATE_POSITIVE_SCORE = 9999
-CHECKMATE_NEGATIVE_SCORE = -9999
-DEFAULT_SEARCH_DEPTH = 3
-
 class Engine:
     def __init__(self, fen):
         self.board = chess.Board()
         self.board.set_fen(fen)
-        self.search_depth = DEFAULT_SEARCH_DEPTH
-        # For future transposition table:
-        # self.transposition_table = {} 
+        self.position_cache = {}
 
+    # is called in flask app
     def get_move(self):
-        # Helper to get the best move as a string
-        # The flask app passes a 'depth' parameter but it's not used by make_move yet.
-        # We can adapt this later if we want dynamic depth from the API.
-        best_move = self.make_move_alpha_beta()
-        if best_move:
-            return str(best_move)
-        # Fallback if no move found (should not happen in normal play)
-        if list(self.board.legal_moves):
-            return str(list(self.board.legal_moves)[0])
-        return "" # Should indicate game over or error
+        best_move = self.make_move()
+        return str(best_move)
 
-    def make_move_alpha_beta(self):
-        original_fen_for_eval = self.board.fen()
-        legal_moves = list(self.board.legal_moves)
-
-        if not legal_moves:
-            return None # No legal moves
-
-        best_move_found = None
+    # get best move for black (AI)
+    def make_move(self):
+        current_fen = self.board.fen()
+        print("calculating\n")
         
-        # Alpha and Beta initialized for the root node
-        alpha = float('-inf')
-        beta = float('inf')
-
-        if self.board.turn == chess.WHITE: # White is the maximizing player for the evaluate_pos score
-            max_eval = float('-inf')
-            for move in legal_moves:
-                self.board.push(move)
-                # Next player (Black) is minimizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(self.board, self.search_depth - 1, alpha, beta, False, original_fen_for_eval)
+        black_legal_moves = list(self.board.legal_moves)
+        if not black_legal_moves:
+            return "no legal moves"
+        
+        best_move = None
+        best_value = float('-inf')  # Black wants to maximize its score
+        
+        for black_move in black_legal_moves:
+            print(".")
+            self.board.push(black_move)
+            
+            # Check for immediate checkmate
+            if self.board.is_checkmate():
                 self.board.pop()
+                return str(black_move)
+            
+            # Get White's best response (minimize Black's score)
+            white_value = self.get_white_response(current_fen, float('-inf'), float('inf'))
+            self.board.pop()
+            
+            # Black wants the move that gives the best result after White's best response
+            if white_value > best_value:
+                best_value = white_value
+                best_move = black_move
+        
+        if best_move is None:
+            print("CHECKMATE or no moves")
+            return "checkmate"
+        
+        print("best move found:", best_move)
+        return str(best_move)
+    
+    def get_white_response(self, original_fen, alpha, beta):
+        """Get White's best response to Black's move"""
+        white_legal_moves = list(self.board.legal_moves)
+        if not white_legal_moves:
+            return 0  # No moves available
+        
+        min_value = float('inf')  # White tries to minimize Black's advantage
+        
+        for white_move in white_legal_moves:
+            self.board.push(white_move)
+            
+            # Check for White checkmate (bad for Black)
+            if self.board.is_checkmate():
+                self.board.pop()
+                return -10000  # Very bad for Black
+            
+            # Get Black's best counter-response
+            black_value = self.get_black_counter_response(original_fen, alpha, beta)
+            self.board.pop()
+            
+            min_value = min(min_value, black_value)
+            beta = min(beta, black_value)
+            
+            # Alpha-beta pruning
+            if beta <= alpha:
+                break
                 
-                if eval_score > max_eval:
-                    max_eval = eval_score
-                    best_move_found = move
-                alpha = max(alpha, eval_score)
-                # No beta cutoff at root for all moves, but alpha helps ordering for future.
-            return best_move_found
-        else: # Black is the minimizing player for the evaluate_pos score
-            min_eval = float('inf')
-            for move in legal_moves:
-                self.board.push(move)
-                # Next player (White) is maximizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(self.board, self.search_depth - 1, alpha, beta, True, original_fen_for_eval)
+        return min_value
+    
+    def get_black_counter_response(self, original_fen, alpha, beta):
+        """Get Black's best counter-response at depth 3"""
+        black_legal_moves = list(self.board.legal_moves)
+        if not black_legal_moves:
+            return 0
+        
+        max_value = float('-inf')  # Black tries to maximize
+        
+        for black_move in black_legal_moves:
+            self.board.push(black_move)
+            
+            # Check for Black checkmate (good for Black)
+            if self.board.is_checkmate():
                 self.board.pop()
-
-                if eval_score < min_eval:
-                    min_eval = eval_score
-                    best_move_found = move
-                beta = min(beta, eval_score) 
-                # No alpha cutoff at root for all moves, but beta helps ordering for future.
-            return best_move_found
-
-    def alpha_beta_search(self, current_board, depth, alpha, beta, is_maximizing_player_for_eval, parent_fen_for_eval):
-        if current_board.is_game_over():
-            if current_board.is_checkmate():
-                # current_board.turn is the player who IS mated.
-                if current_board.turn == chess.WHITE: # White is mated (Black delivered mate)
-                    return CHECKMATE_NEGATIVE_SCORE 
-                else: # Black is mated (White delivered mate)
-                    return CHECKMATE_POSITIVE_SCORE
-            # For other game over conditions (stalemate, etc.), let the model evaluate.
-            # The evaluate_pos function compares parent_fen_for_eval to current_board.fen()
-            # This will give a score from White's perspective.
-            return evaluate_pos(parent_fen_for_eval, current_board.fen())
-
-        if depth == 0:
-            return evaluate_pos(parent_fen_for_eval, current_board.fen())
-
-        legal_moves_ab = list(current_board.legal_moves)
-        if not legal_moves_ab: # Should be caught by is_game_over, but as a safeguard
-             return evaluate_pos(parent_fen_for_eval, current_board.fen())
-
-        fen_of_board_at_this_level = current_board.fen()
-
-        if is_maximizing_player_for_eval: # White's turn in search tree (wants to maximize White's score)
-            current_max_eval = float('-inf')
-            for move in legal_moves_ab:
-                current_board.push(move)
-                # Next player (Black) is minimizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, False, fen_of_board_at_this_level)
-                current_board.pop()
-                current_max_eval = max(current_max_eval, eval_score)
-                alpha = max(alpha, eval_score)
-                if beta <= alpha:
-                    break # Beta cut-off
-            return current_max_eval
-        else: # Black's turn in search tree (wants to minimize White's score)
-            current_min_eval = float('inf')
-            for move in legal_moves_ab:
-                current_board.push(move)
-                # Next player (White) is maximizing. Depth is current_depth - 1.
-                eval_score = self.alpha_beta_search(current_board, depth - 1, alpha, beta, True, fen_of_board_at_this_level)
-                current_board.pop()
-                current_min_eval = min(current_min_eval, eval_score)
-                beta = min(beta, eval_score)
-                if beta <= alpha:
-                    break # Alpha cut-off
-            return current_min_eval
+                return 10000  # Very good for Black
+            
+            # Evaluate position using neural network
+            current_fen = self.board.fen()
+            if current_fen in self.position_cache:
+                evaluation = self.position_cache[current_fen]
+            else:
+                evaluation = evaluate_pos(original_fen, current_fen)
+                self.position_cache[current_fen] = evaluation
+                
+            self.board.pop()
+            
+            max_value = max(max_value, evaluation)
+            alpha = max(alpha, evaluation)
+            
+            # Alpha-beta pruning
+            if beta <= alpha:
+                break
+                
+        return max_value
