@@ -187,9 +187,6 @@ class EngineV4:
         self.name = "V4.0 Pure Neural Power"
         self.version = "4.0"
         
-        # Store initial position for neural network comparison
-        self.initial_fen = fen
-        
         # Store what color this bot is playing ("white" or "black")
         self.bot_color = bot_color
         self.playing_as_black = (bot_color == "black")
@@ -569,12 +566,12 @@ class EngineV4:
             _, cached_score, _, _ = self.transposition_table[current_fen]
             return cached_score
         
-        # Neural network evaluation - compare initial vs current position
-        # This returns how good the current position is vs the initial position
-        raw_nn_score = evaluate_pos(self.initial_fen, current_fen)
+        # Neural network evaluation - evaluate the current position strength
+        # Use the same position twice for absolute position evaluation (like V3)
+        raw_nn_score = evaluate_pos(current_fen, current_fen)
         
         # Convert to bot's perspective
-        # The neural network/evaluate_pos gives score from perspective of side-to-move in initial position
+        # The neural network/evaluate_pos gives score from perspective of side-to-move in current position
         if self.playing_as_black:
             # If we're playing black, use the score as-is (assuming evaluate_pos returns from Black's perspective)
             nn_score = raw_nn_score
