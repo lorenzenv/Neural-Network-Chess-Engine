@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-🤖 LICHESS BOT - V4.0 PURE NEURAL POWER
-Advanced chess bot for Lichess using the V4.0 Pure Neural Power engine
+🤖 LICHESS BOT - V4.1 ENHANCED STRENGTH
+Advanced chess bot for Lichess using the V4.1 Enhanced Strength engine
 """
 
 import os
@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class LichessBot:
-    """Advanced Lichess bot using V4.0 Pure Neural Power engine"""
+    """Advanced Lichess bot using V4.1 Enhanced Strength engine"""
     
     def __init__(self, token: str):
         """Initialize the Lichess bot"""
@@ -332,7 +332,7 @@ class LichessBot:
         self.make_move(game_id)
     
     def make_move(self, game_id: str):
-        """Generate and make a move using the V4.0 engine"""
+        """Generate and make a move using the V4.1 Enhanced Strength engine"""
         if game_id not in self.active_games:
             return
         
@@ -351,7 +351,7 @@ class LichessBot:
                 # Update engine with current position
                 game_info['engine'].board.set_fen(board.fen())
             
-            # Get move from V4.0 Pure Neural Power engine
+            # Get move from V4.1 Enhanced Strength engine
             start_time = time.time()
             move_str = game_info['engine'].get_move()
             calc_time = time.time() - start_time
@@ -449,7 +449,7 @@ def main():
     bot = LichessBot(token)
     
     try:
-        logger.info("🚀 Starting V4.0 Pure Neural Power Lichess Bot...")
+        logger.info("🚀 Starting V4.1 Enhanced Strength Lichess Bot...")
         bot.start()
     except KeyboardInterrupt:
         logger.info("⏹️  Received interrupt signal")

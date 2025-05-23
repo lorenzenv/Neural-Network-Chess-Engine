@@ -11,18 +11,18 @@ except ImportError:
     tflite = tf.lite
 
 # Engine Version Information
-ENGINE_VERSION = "4.0"
-ENGINE_NAME = "Neural Chess Engine V4.0 - Pure Neural Power"
+ENGINE_VERSION = "4.1"
+ENGINE_NAME = "Neural Chess Engine V4.1 - Enhanced Strength"
 ENGINE_FEATURES = [
     "🧠 Pure Neural Network Strength (no opening book)",
-    "⚡ Speed-Optimized Alpha-Beta (depths 2-3 like V3)",
+    "⚡ Enhanced Alpha-Beta (depths 2-5 for stronger play)",
     "🎯 Fast Move Ordering (MVV-LVA + Killers)", 
     "💾 Enhanced Transposition Tables",
     "🔍 Quick Null Move & Late Move Reductions",
     "🎲 Smart Move Variety", 
     "🔄 Three-fold Repetition Avoidance",
     "📊 Streamlined Position Evaluation",
-    "🚀 Faster than V3 with Advanced Features"
+    "🚀 Stronger than V4.0 with Deeper Search"
 ]
 
 # load model
@@ -184,8 +184,8 @@ class EngineV4:
         self.board.set_fen(fen)
         
         # Tournament compatibility
-        self.name = "V4.0 Pure Neural Power"
-        self.version = "4.0"
+        self.name = "V4.1 Enhanced Strength"
+        self.version = "4.1"
         
         # Store what color this bot is playing ("white" or "black")
         self.bot_color = bot_color
@@ -241,7 +241,7 @@ class EngineV4:
         alpha = float('-inf')
         beta = float('inf')
         
-        for depth in range(2, 4):  # Depths 2-3 like V3, but with advanced techniques
+        for depth in range(2, 5):  # Depths 2-5 for stronger play
             try:
                 # Aspiration window only for depth 3+ to save time
                 if depth > 2 and best_move:
@@ -257,8 +257,8 @@ class EngineV4:
                 
                 print(f"Depth {depth}: {move} (score: {score:.2f}, nodes: {self.nodes_searched})")
                 
-                # Early exit for very strong positions to save time
-                if abs(score) > 800:  # Lower threshold for faster exit
+                # Early exit for very strong positions - higher threshold for stronger play
+                if abs(score) > 1500:  # Higher threshold means less early exits
                     break
                     
             except Exception as e:
