@@ -1,8 +1,14 @@
 import chess
 import numpy as np
-import tflite_runtime.interpreter as tflite
 import random
 from util import *
+
+# TensorFlow Lite compatibility layer
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow as tf
+    tflite = tf.lite
 
 # Engine Version Information
 ENGINE_VERSION = "4.0"

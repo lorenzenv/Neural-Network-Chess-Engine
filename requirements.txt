@@ -3,3 +3,4 @@ chess
 tflite-runtime
 numpy<2.0
 gunicorn
+berserk
