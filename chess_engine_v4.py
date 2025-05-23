@@ -179,7 +179,7 @@ def has_pawn_support(board, square, color):
     return False
 
 class EngineV4:
-    def __init__(self, fen):
+    def __init__(self, fen, bot_color="black"):
         self.board = chess.Board()
         self.board.set_fen(fen)
         
@@ -189,6 +189,10 @@ class EngineV4:
         
         # Store initial position for neural network comparison
         self.initial_fen = fen
+        
+        # Store what color this bot is playing ("white" or "black")
+        self.bot_color = bot_color
+        self.playing_as_black = (bot_color == "black")
         
         # Enhanced caching system
         self.transposition_table = {}  # Stores {position: (depth, score, move, node_type)}
@@ -565,30 +569,52 @@ class EngineV4:
             _, cached_score, _, _ = self.transposition_table[current_fen]
             return cached_score
         
-        # Neural network evaluation (core strength) - FIXED BUG!
-        # Compare the initial position with current position
+        # Neural network evaluation - compare initial vs current position
+        # This returns how good the current position is vs the initial position
         raw_nn_score = evaluate_pos(self.initial_fen, current_fen)
         
-        # Simplified and faster positional factors
+        # Convert to bot's perspective
+        # The neural network/evaluate_pos gives score from perspective of side-to-move in initial position
+        if self.playing_as_black:
+            # If we're playing black, use the score as-is (assuming evaluate_pos returns from Black's perspective)
+            nn_score = raw_nn_score
+        else:
+            # If we're playing white, flip the score 
+            nn_score = -raw_nn_score
+        
+        # Simplified and faster positional factors (all from bot's perspective)
         positional_bonus = 0
         
         # Quick check bonus/penalty
         if self.board.is_check():
-            positional_bonus += 30 if self.board.turn == chess.BLACK else -30
+            if self.playing_as_black:
+                positional_bonus += 30 if self.board.turn == chess.BLACK else -30
+            else:
+                positional_bonus += 30 if self.board.turn == chess.WHITE else -30
         
-        # Fast material balance
+        # Fast material balance (from bot's perspective)
         material_score = self.quick_material_balance()
+        if not self.playing_as_black:
+            material_score = -material_score  # Flip for White
         
-        # Simplified piece activity (just mobility)
+        # Simplified piece activity (from bot's perspective)
         mobility_score = len(list(self.board.legal_moves))
-        if self.board.turn == chess.WHITE:
-            mobility_score = -mobility_score
+        if self.playing_as_black:
+            # When playing black, more mobility when it's our turn is good
+            if self.board.turn == chess.WHITE:
+                mobility_score = -mobility_score
+        else:
+            # When playing white, more mobility when it's our turn is good  
+            if self.board.turn == chess.BLACK:
+                mobility_score = -mobility_score
         
-        # Quick king safety
+        # Quick king safety (from bot's perspective)
         king_safety = self.quick_king_safety()
+        if not self.playing_as_black:
+            king_safety = -king_safety  # Flip for White
         
         # Combine factors with reduced weights for speed
-        final_score = (raw_nn_score + 
+        final_score = (nn_score + 
                       (positional_bonus * 0.08) + 
                       (material_score * 0.04) + 
                       (mobility_score * 0.02) +

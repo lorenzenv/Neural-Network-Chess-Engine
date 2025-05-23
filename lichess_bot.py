@@ -335,7 +335,9 @@ class LichessBot:
             
             # Initialize engine for this position
             if game_info['engine'] is None:
-                game_info['engine'] = EngineV4(board.fen())
+                # Pass the bot's color to the engine
+                bot_color = game_info['color']
+                game_info['engine'] = EngineV4(board.fen(), bot_color)
             else:
                 # Update engine with current position
                 game_info['engine'].board.set_fen(board.fen())
