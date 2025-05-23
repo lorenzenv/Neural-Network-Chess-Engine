@@ -1,6 +1,6 @@
 import chess
 import numpy as np
-import tflite_runtime.interpreter as tflite
+import tensorflow as tf
 import random
 from util import *
 
@@ -20,7 +20,7 @@ ENGINE_FEATURES = [
 ]
 
 # load model
-interpreter = tflite.Interpreter(model_path="model.tflite")
+interpreter = tf.lite.Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
@@ -170,6 +170,11 @@ class EngineV3:
     def __init__(self, fen):
         self.board = chess.Board()
         self.board.set_fen(fen)
+        
+        # Tournament compatibility
+        self.name = "V3.2 Anti-Repetition"
+        self.version = "3.2"
+        
         self.position_cache = {}
         self.nodes_searched = 0
         self.killer_moves = [[] for _ in range(10)]  # Killer moves per depth
