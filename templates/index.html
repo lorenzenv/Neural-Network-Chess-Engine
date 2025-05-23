@@ -1,112 +1,160 @@
 <!DOCTYPE html>
 <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <title>Neural Network Chess Engine</title>
-        <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
-        
-        <script type="text/javascript" src="{{ url_for('static',filename='bootstrap.js') }}"></script>
-        
-        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
- 
 
-        <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></link>
-        <link rel="stylesheet" href="{{ url_for('static', filename='libs/chessboard/css/chessboard-0.3.0.css') }}"></link>
+<head>
+  <meta charset="UTF-8">
+  <title>Neural Network Chess Engine</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet"
+    integrity="sha384-EVSTQN3/azprG1Anm3QDgpJLIm9Nao0Yz1ztcQTwFspd3yD65VohhpuuCOmLASjC" crossorigin="anonymous">
+
+  <script type="text/javascript" src="{{ url_for('static',filename='bootstrap.js') }}"></script>
+
+  <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.2.1/jquery.min.js"></script>
 
 
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.js"></script>
-        <script type="text/javascript"> $SCRIPT_ROOT = {{ request.script_root|tojson|safe }}; </script>
-        <script type="text/javascript" src="{{ url_for('static',filename='libs/chessboard/js/chessboard-0.3.0.js') }}"></script>
-        <script type="text/javascript" src="{{ url_for('static',filename='libs/chessboard/js/chessboard-0.3.0.min.js') }}"></script>
-        <script type="text/javascript" src="{{ url_for('static',filename='scripts.js') }}"></script>
-    </head>
-    <body>
-        <nav class="navbar navbar-expand-md navbar-fixed-top navbar-dark bg-dark main-nav">
-            <div class="container">
-                <ul class="nav navbar-nav mx-auto">
-                    <li class="nav-item"><a class="nav-link" href="#">
-                        <center><h5>
-                        Neural Network Chess Engine<br>
-                        Final Project @ Spiced Academy | Sept. 2022
-                        </center></h5>
-                    </a></li>
-                </ul>
-
-            </div>
-        </nav>
-        
-        <div class="container">
-            <br><br>
-            <div class="row">
-                <div class="col-xs-12 col-sm-6">
-                    <div id="mainWindow">
-                        <div id="piecesB"></div>
-                        <div id="board"></div>
-                        <div id="piecesW"></div>
-                    </div>
-                </div>
-                <div class="col-xs-12 col-sm-6">
-                    <div class="accordion accordion-flush" id="accordionFlushExample">
-                        <div class="accordion-item">
-                          <h2 class="accordion-header" id="flush-headingOne">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapseOne" aria-expanded="false" aria-controls="flush-collapseOne">
-                              Resources
-                            </button>
-                          </h2>
-                          <div id="flush-collapseOne" class="accordion-collapse collapse" aria-labelledby="flush-headingOne" data-bs-parent="#accordionFlushExample">
-                            <div class="accordion-body">
-                                
-                                DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess<br>
-                                <code>by Omid E. David, Nathan S. Netanyahu, and Lior Wolf</code><br><br>
-
-                                A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess"<br>
-                                <code>by oripress</code><br><br>
-                            
-                                python-chess: a chess library for Python<br>
-                                <code>by Niklas Fiekas</code><br><br>
-
-                                chessboard.js<br>
-                                <code>by Chris Oakman</code><br><br>
-                            
-                            </div>
-                          </div>
-                        </div>
-                        <div class="accordion-item">
-                          <h2 class="accordion-header" id="flush-headingTwo">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapseTwo" aria-expanded="false" aria-controls="flush-collapseTwo">
-                              Engine
-                            </button>
-                          </h2>
-                          <div id="flush-collapseTwo" class="accordion-collapse collapse" aria-labelledby="flush-headingTwo" data-bs-parent="#accordionFlushExample">
-                            <div class="accordion-body">
-                                
-                                The engine is created with a database of 2 million chess positions. The Tensorflow structure looks as follows:<br><br>
-                                <img src="https://i.ibb.co/sHY9XWp/structure.png">
-
-                            </div>
-                          </div>
-                        </div>
-                        <div class="accordion-item">
-                          <h2 class="accordion-header" id="flush-headingThree">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#flush-collapseThree" aria-expanded="false" aria-controls="flush-collapseThree">
-                              Things to improve
-                            </button>
-                          </h2>
-                          <div id="flush-collapseThree" class="accordion-collapse collapse" aria-labelledby="flush-headingThree" data-bs-parent="#accordionFlushExample">
-                            <div class="accordion-body">
-                                
-                                - Implement autoencoder structure<br>
-                                - Position hashing<br>
-                                - Improved Alpha-Beta Search<br>
-                                - Write custom training loop for better hyperparameter optimization<br>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  </link>
+  <link rel="stylesheet" href="{{ url_for('static', filename='libs/chessboard/css/chessboard-0.3.0.css') }}">
+  </link>
 
 
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                </div>
-            </div>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.js"></script>
+  <script type="text/javascript"> $SCRIPT_ROOT = {{ request.script_root | tojson | safe }}; </script>
+  <script type="text/javascript"
+    src="{{ url_for('static',filename='libs/chessboard/js/chessboard-0.3.0.js') }}"></script>
+  <script type="text/javascript"
+    src="{{ url_for('static',filename='libs/chessboard/js/chessboard-0.3.0.min.js') }}"></script>
+  <script type="text/javascript" src="{{ url_for('static',filename='scripts.js') }}"></script>
+</head>
+
+<body>
+  <nav class="navbar navbar-expand-md navbar-fixed-top navbar-dark bg-dark main-nav">
+    <div class="container">
+      <ul class="nav navbar-nav mx-auto">
+        <li class="nav-item"><a class="nav-link" href="#">
+            <center>
+              <h5>
+                Neural Network Chess Engine<br>
+                <small><span id="engine-version">Loading version...</span></small><br>
+                Final Project @ Spiced Academy | Sept. 2022
+            </center>
+            </h5>
+          </a></li>
+      </ul>
+
+    </div>
+  </nav>
+
+  <div class="container">
+    <br><br>
+    <div class="row">
+      <div class="col-xs-12 col-sm-6">
+        <div id="mainWindow">
+          <div id="piecesB"></div>
+          <div id="board"></div>
+          <div id="piecesW"></div>
         </div>
-    </body>
+      </div>
+      <div class="col-xs-12 col-sm-6">
+        <div class="accordion accordion-flush" id="accordionFlushExample">
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="flush-headingZero">
+              <button class="accordion-button" type="button" data-bs-toggle="collapse"
+                data-bs-target="#flush-collapseZero" aria-expanded="true" aria-controls="flush-collapseZero">
+                🚀 Engine Status
+              </button>
+            </h2>
+            <div id="flush-collapseZero" class="accordion-collapse collapse show" aria-labelledby="flush-headingZero"
+              data-bs-parent="#accordionFlushExample">
+              <div class="accordion-body">
+                <div id="engine-info">
+                  <div class="d-flex justify-content-between">
+                    <strong>Version:</strong>
+                    <span id="engine-version-detail">Loading...</span>
+                  </div>
+                  <div class="d-flex justify-content-between">
+                    <strong>Engine:</strong>
+                    <span id="engine-name">Loading...</span>
+                  </div>
+                  <div class="mt-2">
+                    <strong>Features:</strong>
+                    <ul id="engine-features" class="list-unstyled ms-2">
+                      <li>Loading features...</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="flush-headingOne">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                data-bs-target="#flush-collapseOne" aria-expanded="false" aria-controls="flush-collapseOne">
+                Resources
+              </button>
+            </h2>
+            <div id="flush-collapseOne" class="accordion-collapse collapse" aria-labelledby="flush-headingOne"
+              data-bs-parent="#accordionFlushExample">
+              <div class="accordion-body">
+
+                DeepChess: End-to-End Deep Neural Network for Automatic Learning in Chess<br>
+                <code>by Omid E. David, Nathan S. Netanyahu, and Lior Wolf</code><br><br>
+
+                A TensorFlow implementation of "DeepChess: End-to-End Deep Neural Network for Automatic Learning in
+                Chess"<br>
+                <code>by oripress</code><br><br>
+
+                python-chess: a chess library for Python<br>
+                <code>by Niklas Fiekas</code><br><br>
+
+                chessboard.js<br>
+                <code>by Chris Oakman</code><br><br>
+
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="flush-headingTwo">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                data-bs-target="#flush-collapseTwo" aria-expanded="false" aria-controls="flush-collapseTwo">
+                Engine
+              </button>
+            </h2>
+            <div id="flush-collapseTwo" class="accordion-collapse collapse" aria-labelledby="flush-headingTwo"
+              data-bs-parent="#accordionFlushExample">
+              <div class="accordion-body">
+
+                The engine is created with a database of 2 million chess positions. The Tensorflow structure looks as
+                follows:<br><br>
+                <img src="https://i.ibb.co/sHY9XWp/structure.png">
+
+              </div>
+            </div>
+          </div>
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="flush-headingThree">
+              <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse"
+                data-bs-target="#flush-collapseThree" aria-expanded="false" aria-controls="flush-collapseThree">
+                Things to improve
+              </button>
+            </h2>
+            <div id="flush-collapseThree" class="accordion-collapse collapse" aria-labelledby="flush-headingThree"
+              data-bs-parent="#accordionFlushExample">
+              <div class="accordion-body">
+
+                - Implement autoencoder structure<br>
+                - Position hashing<br>
+                - Improved Alpha-Beta Search<br>
+                - Write custom training loop for better hyperparameter optimization<br>
+
+
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+
 </html>

@@ -7,15 +7,15 @@ var board,
 
 // do not pick up pieces if the game is over
 // only pick up pieces for the side to move
-var onDragStart = function(source, piece, position, orientation) {
+var onDragStart = function (source, piece, position, orientation) {
   if (game.game_over() === true ||
-      (game.turn() === 'w' && piece.search(/^b/) !== -1) ||
-      (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
+    (game.turn() === 'w' && piece.search(/^b/) !== -1) ||
+    (game.turn() === 'b' && piece.search(/^w/) !== -1)) {
     return false;
   }
 };
 
-var onDrop = function(source, target) {
+var onDrop = function (source, target) {
   // see if the move is legal
   var move = game.move({
     from: source,
@@ -32,11 +32,11 @@ var onDrop = function(source, target) {
 
 // update the board position after the piece snap
 // for castling, en passant, pawn promotion
-var onSnapEnd = function() {
-    board.position(game.fen());
+var onSnapEnd = function () {
+  board.position(game.fen());
 };
 
-var updateStatus = function() {
+var updateStatus = function () {
   var status = '';
 
   var moveColor = 'White';
@@ -79,111 +79,140 @@ var cfg = {
   onSnapEnd: onSnapEnd
 };
 
-var randomResponse = function() {
-    fen = game.fen()
-    $.get($SCRIPT_ROOT + "/move/" + fen, function(data) {
-        game.move(data, {sloppy: true});
-        // board.position(game.fen());
-        updateStatus();
-    })
+var randomResponse = function () {
+  fen = game.fen()
+  $.get($SCRIPT_ROOT + "/move/" + fen, function (data) {
+    game.move(data, { sloppy: true });
+    // board.position(game.fen());
+    updateStatus();
+  })
 }
 
-var getResponseMove = function() {
-    var e = document.getElementById("sel1");
-    var depth = 2
-    fen = game.fen()
-    $.get($SCRIPT_ROOT + "/move/" + depth + "/" + fen, function(data) {
-        game.move(data, {sloppy: true});
-        updateStatus();
-        setTimeout(function(){ board.position(game.fen()); }, 100);
-    })
+var getResponseMove = function () {
+  var e = document.getElementById("sel1");
+  var depth = 2
+  fen = game.fen()
+  $.get($SCRIPT_ROOT + "/move/" + depth + "/" + fen, function (data) {
+    game.move(data, { sloppy: true });
+    updateStatus();
+    setTimeout(function () { board.position(game.fen()); }, 100);
+  })
 }
 
 
-setTimeout(function() {
-    board = ChessBoard('board', cfg);
+setTimeout(function () {
+  board = ChessBoard('board', cfg);
 }, 0);
 
 
-var setPGN = function() {
+var setPGN = function () {
   var table = document.getElementById("pgn");
   var pgn = game.pgn().split(" ");
   var move = pgn[pgn.length - 1];
 }
 
-var createTable = function() {
+var createTable = function () {
 
-    var pgn = game.pgn().split(" ");
-    var data = [];
+  var pgn = game.pgn().split(" ");
+  var data = [];
 
-    for (i = 0; i < pgn.length; i += 3) {
-        var index = i / 3;
-        data[index] = {};
-        for (j = 0; j < 3; j++) {
-            var label = "";
-            if (j === 0) {
-                label = "moveNumber";
-            } else if (j === 1) {
-                label = "whiteMove";
-            } else if (j === 2) {
-                label = "blackMove";
-            }
-            if (pgn.length > i + j) {
-                data[index][label] = pgn[i + j];
-            } else {
-                data[index][label] = "";
-            }
-        }
+  for (i = 0; i < pgn.length; i += 3) {
+    var index = i / 3;
+    data[index] = {};
+    for (j = 0; j < 3; j++) {
+      var label = "";
+      if (j === 0) {
+        label = "moveNumber";
+      } else if (j === 1) {
+        label = "whiteMove";
+      } else if (j === 2) {
+        label = "blackMove";
+      }
+      if (pgn.length > i + j) {
+        data[index][label] = pgn[i + j];
+      } else {
+        data[index][label] = "";
+      }
     }
+  }
 
-    $('#pgn tr').not(':first').remove();
-    var html = '';
-    for (var i = 0; i < data.length; i++) {
-        html += '<tr><td>' + data[i].moveNumber + '</td><td>'
-        + data[i].whiteMove + '</td><td>'
-        + data[i].blackMove + '</td></tr>';
-    }
+  $('#pgn tr').not(':first').remove();
+  var html = '';
+  for (var i = 0; i < data.length; i++) {
+    html += '<tr><td>' + data[i].moveNumber + '</td><td>'
+      + data[i].whiteMove + '</td><td>'
+      + data[i].blackMove + '</td></tr>';
+  }
 
-    $('#pgn tr').first().after(html);
+  $('#pgn tr').first().after(html);
 }
 
-var updateScroll = function() {
-    $('#moveTable').scrollTop($('#moveTable')[0].scrollHeight);
+var updateScroll = function () {
+  $('#moveTable').scrollTop($('#moveTable')[0].scrollHeight);
 }
 
-var setStatus = function(status) {
+var setStatus = function (status) {
   document.getElementById("status").innerHTML = status;
 }
 
-var takeBack = function() {
+var takeBack = function () {
+  game.undo();
+  if (game.turn() != "w") {
     game.undo();
-    if (game.turn() != "w") {
-        game.undo();
+  }
+  board.position(game.fen());
+  updateStatus();
+}
+
+var newGame = function () {
+  game.reset();
+  board.start();
+  updateStatus();
+}
+
+var getCapturedPieces = function () {
+  var history = game.history({ verbose: true });
+  for (var i = 0; i < history.length; i++) {
+    if ("captured" in history[i]) {
+      console.log(history[i]["captured"]);
     }
-    board.position(game.fen());
-    updateStatus();
+  }
 }
 
-var newGame = function() {
-    game.reset();
-    board.start();
-    updateStatus();
+var getLastCapture = function () {
+  var history = game.history({ verbose: true });
+  var index = history.length - 1;
+
+  if (history[index] != undefined && "captured" in history[index]) {
+    console.log(history[index]["captured"]);
+  }
 }
 
-var getCapturedPieces = function() {
-    var history = game.history({ verbose: true });
-    for (var i = 0; i < history.length; i++) {
-        if ("captured" in history[i]) {
-            console.log(history[i]["captured"]);
-        }
-    }
+// Load engine version information
+var loadEngineVersion = function () {
+  $.get($SCRIPT_ROOT + "/version", function (data) {
+    // Update navbar version
+    $("#engine-version").text("v" + data.version);
+
+    // Update detailed version info
+    $("#engine-version-detail").text("v" + data.version);
+    $("#engine-name").text(data.name);
+
+    // Update features list
+    var featuresList = $("#engine-features");
+    featuresList.empty();
+    data.features.forEach(function (feature) {
+      featuresList.append("<li>✓ " + feature + "</li>");
+    });
+  }).fail(function () {
+    $("#engine-version").text("Version unavailable");
+    $("#engine-version-detail").text("Error loading version");
+    $("#engine-name").text("Engine unavailable");
+    $("#engine-features").html("<li>Could not load features</li>");
+  });
 }
 
-var getLastCapture = function() {
-    var history = game.history({ verbose: true });
-    var index = history.length - 1;
-
-    if (history[index] != undefined && "captured" in history[index]) {
-        console.log(history[index]["captured"]);
-    }
-}
+// Load version info when page loads
+$(document).ready(function () {
+  loadEngineVersion();
+});

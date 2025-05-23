@@ -3,6 +3,17 @@ import numpy as np
 import tflite_runtime.interpreter as tflite
 from util import *
 
+# Engine Version Information
+ENGINE_VERSION = "2.0"
+ENGINE_NAME = "Neural Chess Engine V2"
+ENGINE_FEATURES = [
+    "Proper Alpha-Beta Pruning",
+    "Advanced Move Ordering", 
+    "Enhanced Position Caching",
+    "Tactical Awareness",
+    "Material Balance Detection"
+]
+
 # load model
 interpreter = tflite.Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
@@ -104,6 +115,14 @@ class EngineV2:
         self.board.set_fen(fen)
         self.position_cache = {}
         self.nodes_searched = 0
+
+    def get_version_info(self):
+        """Return version information about this engine"""
+        return {
+            "version": ENGINE_VERSION,
+            "name": ENGINE_NAME,
+            "features": ENGINE_FEATURES
+        }
 
     # is called in flask app
     def get_move(self):
