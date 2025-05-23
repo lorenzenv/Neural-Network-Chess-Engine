@@ -1,6 +1,6 @@
 import chess
 import numpy as np
-import tflite_runtime.interpreter as tflite
+import tensorflow as tf
 import random
 from util import *
 
@@ -20,7 +20,7 @@ ENGINE_FEATURES = [
 ]
 
 # load model
-interpreter = tflite.Interpreter(model_path="model.tflite")
+interpreter = tf.lite.Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()

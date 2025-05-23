@@ -1,5 +1,5 @@
 from flask import Flask, render_template, jsonify
-from chess_engine_v3 import EngineV3, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from chess_engine_v4 import EngineV4, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
 
 app = Flask(__name__)
 
@@ -19,7 +19,7 @@ def get_version():
 # got the idea from https://github.com/brokenloop/FlaskChess/blob/master/flask_app.py
 @app.route('/move/<int:depth>/<path:fen>')
 def get_move(depth, fen):
-    engine = EngineV3(fen)
+    engine = EngineV4(fen)
     prediction = engine.get_move()
     return prediction
 
