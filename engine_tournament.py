@@ -858,6 +858,14 @@ class EngineV3:
         
         return score
 
+# Import the real V4.0 engine
+try:
+    from chess_engine_v4 import EngineV4
+    print("✅ Imported V4.0 Pure Neural Power!")
+except ImportError:
+    print("❌ Could not import V4.0 - using mock engine")
+    EngineV4 = None
+
 def play_game(white_engine, black_engine, max_moves=100):
     """Play a game between two engines"""
     board = chess.Board()
@@ -970,6 +978,10 @@ def run_tournament():
         EngineV2("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"),
         EngineV3("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
     ]
+    
+    # Add V4.0 if available
+    if EngineV4:
+        engines.append(EngineV4("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"))
     
     # Tournament results
     results = {}

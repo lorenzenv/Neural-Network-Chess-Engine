@@ -212,6 +212,10 @@ class EngineV4:
         self.board = chess.Board()
         self.board.set_fen(fen)
         
+        # Tournament compatibility
+        self.name = "V4.0 Pure Neural Power"
+        self.version = "4.0"
+        
         # Enhanced caching system
         self.transposition_table = {}  # Stores {position: (depth, score, move, node_type)}
         self.nodes_searched = 0
