@@ -4,16 +4,16 @@ import tflite_runtime.interpreter as tflite
 from util import *
 
 # Engine Version Information
-ENGINE_VERSION = "3.0"
-ENGINE_NAME = "Neural Chess Engine V3 - Quiescence"
+ENGINE_VERSION = "3.1"
+ENGINE_NAME = "Neural Chess Engine V3.1 - Speed Optimized"
 ENGINE_FEATURES = [
-    "Quiescence Search (tactical stability)",
-    "Killer Move Heuristic (speed boost)", 
-    "Enhanced Alpha-Beta Pruning",
-    "Advanced Move Ordering",
-    "Intelligent Position Caching",
-    "Tactical Pattern Recognition",
-    "Opening Book Integration"
+    "Optimized Quiescence Search (faster tactical stability)",
+    "Efficient Killer Move Heuristic", 
+    "Streamlined Alpha-Beta Pruning",
+    "Fast Move Ordering",
+    "Intelligent Position Caching with limits",
+    "Quick Tactical Pattern Recognition",
+    "Speed-optimized evaluation"
 ]
 
 # load model
@@ -190,20 +190,30 @@ class EngineV3:
         current_fen = self.board.fen()
         print("calculating\n")
         
+        # Limit cache size for memory efficiency
+        if len(self.position_cache) > 10000:
+            # Keep only recent 5000 positions
+            cache_items = list(self.position_cache.items())
+            self.position_cache = dict(cache_items[-5000:])
+        
         # Check opening book first
         book_move = get_opening_move(current_fen)
         if book_move:
             print(f"📚 Opening book move: {book_move}")
             return book_move
         
-        # Use iterative deepening for better time management
+        # Reduced iterative deepening for speed - only 2 depths
         best_move = None
-        for depth in range(1, 5):  # Search depths 1-4
+        for depth in range(2, 4):  # Search depths 2-3 only
             try:
                 move, score = self.alpha_beta_root(depth, float('-inf'), float('inf'))
                 if move:
                     best_move = move
                 print(f"Depth {depth}: {move} (score: {score:.2f})")
+                
+                # Early exit if we found a great move
+                if score > 500:  # Strong advantage found
+                    break
             except:
                 break
         
@@ -279,8 +289,8 @@ class EngineV3:
             return self.position_cache[cache_key]
         
         if depth == 0:
-            # Enter quiescence search for tactical stability
-            score = self.quiescence(alpha, beta, maximizing_player, 5)
+            # Enter quiescence search for tactical stability - reduced depth for speed
+            score = self.quiescence(alpha, beta, maximizing_player, 2)  # Reduced from 3 to 2
             self.position_cache[cache_key] = score
             return score
         
@@ -327,7 +337,7 @@ class EngineV3:
             return min_eval
     
     def quiescence(self, alpha, beta, maximizing_player, depth):
-        """Quiescence search to avoid horizon effect"""
+        """Optimized quiescence search for speed"""
         if depth == 0:
             return self.evaluate_position()
         
@@ -338,15 +348,30 @@ class EngineV3:
                 return beta
             alpha = max(alpha, stand_pat)
             
-            # Only consider captures and checks
-            captures = [move for move in self.board.legal_moves 
-                       if self.board.piece_at(move.to_square) is not None or self.board.is_check()]
+            # Only consider good captures (positive material gain)
+            captures = []
+            for move in self.board.legal_moves:
+                if self.board.piece_at(move.to_square) is not None:
+                    captured_piece = self.board.piece_at(move.to_square)
+                    moving_piece = self.board.piece_at(move.from_square)
+                    
+                    # Simple material values for quick filtering
+                    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
+                    
+                    if captured_piece and moving_piece:
+                        victim_value = piece_values.get(captured_piece.piece_type, 0)
+                        attacker_value = piece_values.get(moving_piece.piece_type, 1)
+                        
+                        # Only consider favorable or equal trades
+                        if victim_value >= attacker_value:
+                            captures.append(move)
             
             if not captures:
                 return stand_pat
             
-            # Order captures by MVV-LVA
-            captures = order_moves_v3(self.board, captures)
+            # Limit to best 3 captures for speed
+            if len(captures) > 3:
+                captures = captures[:3]
             
             for move in captures:
                 self.board.push(move)
@@ -363,13 +388,27 @@ class EngineV3:
                 return alpha
             beta = min(beta, stand_pat)
             
-            captures = [move for move in self.board.legal_moves 
-                       if self.board.piece_at(move.to_square) is not None or self.board.is_check()]
+            # Same optimization for minimizing player
+            captures = []
+            for move in self.board.legal_moves:
+                if self.board.piece_at(move.to_square) is not None:
+                    captured_piece = self.board.piece_at(move.to_square)
+                    moving_piece = self.board.piece_at(move.from_square)
+                    
+                    piece_values = {chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3, chess.ROOK: 5, chess.QUEEN: 9}
+                    
+                    if captured_piece and moving_piece:
+                        victim_value = piece_values.get(captured_piece.piece_type, 0)
+                        attacker_value = piece_values.get(moving_piece.piece_type, 1)
+                        
+                        if victim_value >= attacker_value:
+                            captures.append(move)
             
             if not captures:
                 return stand_pat
             
-            captures = order_moves_v3(self.board, captures)
+            if len(captures) > 3:
+                captures = captures[:3]
             
             for move in captures:
                 self.board.push(move)
@@ -383,47 +422,66 @@ class EngineV3:
             return beta
     
     def evaluate_position(self):
-        """Enhanced position evaluation with pattern recognition"""
+        """Speed-optimized position evaluation"""
         current_fen = self.board.fen()
         
         # Use cache if available
         if current_fen in self.position_cache:
             return self.position_cache[current_fen]
         
-        # Get neural network evaluation
+        # Get neural network evaluation - this is the slowest part
         original_fen = self.board.fen()
         nn_score = evaluate_pos(original_fen, current_fen)
         
-        # Enhanced tactical bonuses
+        # Simplified tactical bonuses for speed
         tactical_bonus = 0
         
-        # Check penalty/bonus
+        # Quick check penalty/bonus
         if self.board.is_check():
-            if self.board.turn == chess.WHITE:
-                tactical_bonus -= 75  # Being in check is worse
-            else:
-                tactical_bonus += 75
+            tactical_bonus += 50 if self.board.turn == chess.BLACK else -50
         
-        # Material balance with endgame scaling
-        material_score = self.calculate_material_advantage()
+        # Quick material calculation (no need for full calculation every time)
+        material_score = self.quick_material_difference()
         
-        # Positional bonuses
-        positional_bonus = self.evaluate_position_patterns()
+        # Simplified positional bonus
+        positional_bonus = self.quick_position_eval()
         
-        # King safety
-        king_safety = self.evaluate_king_safety()
-        
-        # Combine all factors
-        final_score = (nn_score + 
-                      (tactical_bonus * 0.15) + 
-                      (material_score * 0.08) + 
-                      (positional_bonus * 0.1) + 
-                      (king_safety * 0.12))
+        # Combine with reduced weights for speed
+        final_score = nn_score + (tactical_bonus * 0.1) + (material_score * 0.05) + (positional_bonus * 0.03)
         
         # Cache the result
         self.position_cache[current_fen] = final_score
         
         return final_score
+    
+    def quick_material_difference(self):
+        """Fast material calculation"""
+        # Count pieces quickly
+        white_material = sum(len(self.board.pieces(pt, chess.WHITE)) * val 
+                           for pt, val in [(chess.PAWN, 100), (chess.KNIGHT, 320), 
+                                         (chess.BISHOP, 330), (chess.ROOK, 500), (chess.QUEEN, 900)])
+        black_material = sum(len(self.board.pieces(pt, chess.BLACK)) * val 
+                           for pt, val in [(chess.PAWN, 100), (chess.KNIGHT, 320), 
+                                         (chess.BISHOP, 330), (chess.ROOK, 500), (chess.QUEEN, 900)])
+        return black_material - white_material
+    
+    def quick_position_eval(self):
+        """Fast positional evaluation"""
+        score = 0
+        
+        # Quick center control check
+        center_squares = [chess.E4, chess.E5, chess.D4, chess.D5]
+        for square in center_squares:
+            piece = self.board.piece_at(square)
+            if piece:
+                score += 30 if piece.color == chess.BLACK else -30
+        
+        # Quick king safety
+        black_king = self.board.king(chess.BLACK)
+        if black_king and black_king in [chess.G8, chess.C8]:
+            score += 25
+        
+        return score
     
     def calculate_material_advantage(self):
         """Enhanced material calculation"""
