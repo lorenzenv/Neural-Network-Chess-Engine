@@ -136,12 +136,21 @@ class LichessBot:
             logger.info(f"⏱️  Unsupported time control: {speed}")
             return False
         
-        # Check opponent rating
+        # Accept all rated games within reasonable rating range for better ELO calibration
+        rated = challenge['rated']
+        if rated:
+            logger.info(f"✅ Accepting rated game for ELO calibration")
+        
+        # Check opponent rating - be more lenient for rated games
         challenger = challenge['challenger']
         if 'rating' in challenger:
             rating = challenger['rating']
-            if rating < self.min_rating or rating > self.max_rating:
-                logger.info(f"📊 Rating out of range: {rating} (accepted: {self.min_rating}-{self.max_rating})")
+            # For rated games, accept wider rating range to get better ELO assessment
+            min_rating = 600 if rated else self.min_rating
+            max_rating = 3200 if rated else self.max_rating
+            
+            if rating < min_rating or rating > max_rating:
+                logger.info(f"📊 Rating out of range: {rating} (accepted: {min_rating}-{max_rating})")
                 return False
         
         # Fixed time control parsing - don't check for UltraBullet if speed is already classified as blitz/rapid/classical
