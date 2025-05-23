@@ -1,5 +1,6 @@
 import numpy as np
 import chess
+import itertools
 
 # https://github.com/oripress/DeepChess
 
