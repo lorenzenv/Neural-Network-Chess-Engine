@@ -13,7 +13,7 @@ from typing import Dict, Optional, Any
 import chess
 import chess.pgn
 import berserk
-from chess_engine_v4 import EngineV4, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from chess_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
 
 # Configure logging
 logging.basicConfig(
@@ -345,8 +345,9 @@ class LichessBot:
             # Initialize engine for this position
             if game_info['engine'] is None:
                 # Pass the bot's color to the engine
-                bot_color = game_info['color']
-                game_info['engine'] = EngineV4(board.fen(), bot_color)
+                # The new Engine class determines color from FEN, bot_color parameter is not used by Engine itself
+                # but lichess_bot uses game_info['color'] to know its own playing color.
+                game_info['engine'] = Engine(board.fen())
             else:
                 # Update engine with current position
                 game_info['engine'].board.set_fen(board.fen())

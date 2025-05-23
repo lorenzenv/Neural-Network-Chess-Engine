@@ -1,5 +1,5 @@
 from flask import Flask, render_template, jsonify, request
-from chess_engine_v4 import EngineV4, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from chess_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
 
 app = Flask(__name__)
 
@@ -29,7 +29,7 @@ def get_move():
         print(f"🧠 Calculating move for position: {fen}")
         
         # Create engine (defaulting to black for web interface)
-        engine = EngineV4(fen, "black")
+        engine = Engine(fen)
         move = engine.get_move()
         
         print(f"✅ Calculated move: {move}")
