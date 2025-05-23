@@ -56,23 +56,3 @@ Four *dropout layers* were additionally used for adding noise to the training-pr
 "Adam" was chosen as the optimzier as well as *Binary Crossentropy* as the loss-function.
 
 The model reached a *validation accuracy of 87%* through 300 epochs of training with a Learning Rate that started at 0.001 and was multiplied by 0.99 at each epoch.
-
----
-
-#### Things to improve:
-
-- Implement an autoencoder structure
-
-- Position hashing and draw-avoidence in winning positions
-
-- Improved Alpha-Beta Search
-
-- Write custom training loop for better hyperparameter optimization
-
----
-
-#### Files:
-
-- [`train.py`](train.py): Train the A.I
-- [`chess_engine.py`](chess_engine.py): Evaluating and chosing a move
-- [`app.py`](app.py): Flask app
