@@ -2,7 +2,11 @@ import chess
 import numpy as np
 from util import make_bitboard, beautifyFEN # Assuming these are in util.py
 
-import tensorflow.lite as tflite
+try:
+    import tflite_runtime.interpreter as tflite
+except ImportError:
+    import tensorflow as tf
+    tflite = tf.lite
 import time
 
 ENGINE_VERSION = "1.7-AlphaBetaFixedDepthNNRootCompare"
