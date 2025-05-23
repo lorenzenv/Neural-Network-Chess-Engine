@@ -17,131 +17,92 @@ def make_x(first,second):
     x_2 = np.array(x_2, dtype=np.float32).reshape(1,769)
     return x_1, x_2
 
-# get raw model evaluation for two input positions
-def get_raw_model_evaluation(first_fen, second_fen):
-    x_1, x_2 = make_x(first_fen,second_fen)
+# evaluate two input positions
+def evaluate_pos(first, second):
+    x_1, x_2 = make_x(first,second)
     interpreter.set_tensor(input_details[0]['index'], x_1)
     interpreter.set_tensor(input_details[1]['index'], x_2)
     interpreter.invoke()
     evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
     return evaluation
 
-# evaluate two input positions, adjusting score based on whose turn it was in the first FEN
-def evaluate_pos(first_fen, second_fen):
-    raw_score = get_raw_model_evaluation(first_fen, second_fen)
-    board = chess.Board(first_fen)
-    if board.turn == chess.BLACK:
-        return -raw_score
-    return raw_score
-
+# create Engine class
 class Engine:
-    def __init__(self, fen):
-        self.board = chess.Board()
-        self.board.set_fen(fen)
-        self.position_cache = {}
+	def __init__(self, fen):
+		self.board = chess.Board()
+		self.board.set_fen(fen)
 
-    # is called in flask app
-    def get_move(self):
-        best_move = self.make_move()
-        return str(best_move)
+	# is called in flask app
+	def get_move(self):
+		best_move = self.make_move()
+		return str(best_move)
 
-    # get best move for black (AI)
-    def make_move(self):
-        current_fen = self.board.fen()
-        print("calculating\n")
-        
-        black_legal_moves = list(self.board.legal_moves)
-        if not black_legal_moves:
-            return "no legal moves"
-        
-        best_move = None
-        best_value = float('-inf')  # Black wants to maximize its score
-        
-        for black_move in black_legal_moves:
-            print(".")
-            self.board.push(black_move)
-            
-            # Check for immediate checkmate
-            if self.board.is_checkmate():
-                self.board.pop()
-                return str(black_move)
-            
-            # Get White's best response (minimize Black's score)
-            white_value = self.get_white_response(current_fen, float('-inf'), float('inf'))
-            self.board.pop()
-            
-            # Black wants the move that gives the best result after White's best response
-            if white_value > best_value:
-                best_value = white_value
-                best_move = black_move
-        
-        if best_move is None:
-            print("CHECKMATE or no moves")
-            return "checkmate"
-        
-        print("best move found:", best_move)
-        return str(best_move)
-    
-    def get_white_response(self, original_fen, alpha, beta):
-        """Get White's best response to Black's move"""
-        white_legal_moves = list(self.board.legal_moves)
-        if not white_legal_moves:
-            return 0  # No moves available
-        
-        min_value = float('inf')  # White tries to minimize Black's advantage
-        
-        for white_move in white_legal_moves:
-            self.board.push(white_move)
-            
-            # Check for White checkmate (bad for Black)
-            if self.board.is_checkmate():
-                self.board.pop()
-                return -10000  # Very bad for Black
-            
-            # Get Black's best counter-response
-            black_value = self.get_black_counter_response(original_fen, alpha, beta)
-            self.board.pop()
-            
-            min_value = min(min_value, black_value)
-            beta = min(beta, black_value)
-            
-            # Alpha-beta pruning
-            if beta <= alpha:
-                break
-                
-        return min_value
-    
-    def get_black_counter_response(self, original_fen, alpha, beta):
-        """Get Black's best counter-response at depth 3"""
-        black_legal_moves = list(self.board.legal_moves)
-        if not black_legal_moves:
-            return 0
-        
-        max_value = float('-inf')  # Black tries to maximize
-        
-        for black_move in black_legal_moves:
-            self.board.push(black_move)
-            
-            # Check for Black checkmate (good for Black)
-            if self.board.is_checkmate():
-                self.board.pop()
-                return 10000  # Very good for Black
-            
-            # Evaluate position using neural network
-            current_fen = self.board.fen()
-            if current_fen in self.position_cache:
-                evaluation = self.position_cache[current_fen]
-            else:
-                evaluation = evaluate_pos(original_fen, current_fen)
-                self.position_cache[current_fen] = evaluation
-                
-            self.board.pop()
-            
-            max_value = max(max_value, evaluation)
-            alpha = max(alpha, evaluation)
-            
-            # Alpha-beta pruning
-            if beta <= alpha:
-                break
-                
-        return max_value
+	# get best move for black
+	def make_move(self):
+		all_pos = {}
+		black_legal_moves = self.board.legal_moves
+		current_fen_x = self.board.fen()
+		black_response = {}
+		print ("calculating\n")
+		for black_move in black_legal_moves:
+			print (".")
+			white_response = {}
+			self.board.push(black_move)
+			if self.board.is_checkmate():
+				return str(black_move)
+			white_legal_moves = self.board.legal_moves
+			for white_move in white_legal_moves:
+				self.board.push(white_move)
+				if self.board.is_checkmate():
+					white_response[white_move] = 0
+					self.board.pop()
+					break
+				black_legal_moves_depth_2 = self.board.legal_moves
+				black_response_depth_2 = {}
+				for black_move_depth_2 in black_legal_moves_depth_2:
+					self.board.push(black_move_depth_2)
+					if self.board.is_checkmate():
+						black_response_depth_2[black_move_depth_2] = 1
+						self.board.pop()
+						break
+					next_fen_x = self.board.fen()
+					if next_fen_x in all_pos:
+						prediction_number = all_pos[next_fen_x]
+					else:
+						prediction_number = evaluate_pos(current_fen_x, next_fen_x)
+						all_pos[next_fen_x] = prediction_number
+					if len(white_response) > 0:
+						if prediction_number > white_response[max(white_response, key=white_response.get)]:
+							black_response_depth_2[black_move_depth_2] = prediction_number
+							self.board.pop()
+							break
+						else:
+							black_response_depth_2[black_move_depth_2] = prediction_number
+							self.board.pop()
+					else:
+						black_response_depth_2[black_move_depth_2] = prediction_number
+						self.board.pop()
+				if len(black_response) > 0 and len(white_response) > 0:
+					if white_response[min(white_response, key=white_response.get)] < black_response[max(black_response, key=black_response.get)]:
+						white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
+						self.board.pop()
+						break
+					else:
+						if len(black_response_depth_2) > 0:
+							white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
+						self.board.pop()
+				else:
+					if len(black_response_depth_2) > 0:
+						white_response[white_move] = black_response_depth_2[max(black_response_depth_2, key=black_response_depth_2.get)]
+					self.board.pop()
+			if len(white_response) > 0:
+				black_response[black_move] = white_response[min(white_response, key=white_response.get)]
+			self.board.pop()
+		if len(black_response) > 0:
+			best_move = max(black_response, key=black_response.get)
+		else:
+			print ("CHECKMATE")
+			return str("checkmate")
+
+		print ("best move found: ", best_move)
+		return str(best_move)
