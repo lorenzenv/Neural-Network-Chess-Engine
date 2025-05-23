@@ -74,20 +74,9 @@ def test_advanced_search_features():
     print(f"   💾 Cache hits: {engine.cache_hits}")
     print(f"   ⚡ Null move cutoffs: {engine.null_move_cutoffs}")
     print(f"   🎯 Late move reductions: {engine.late_move_reductions}")
-    print(f"   🧮 Transposition table size: {len(engine.transposition_table):,}")
-    print(f"   📚 History table entries: {len(engine.history_table)}")
-    
-    # Calculate search efficiency
-    if engine.nodes_searched > 0:
-        cache_rate = (engine.cache_hits / engine.nodes_searched) * 100
-        print(f"   💡 Cache hit rate: {cache_rate:.1f}%")
-        
-        if cache_rate > 10:
-            print("   ✅ Excellent cache efficiency!")
-        elif cache_rate > 5:
-            print("   👍 Good cache usage!")
-        else:
-            print("   📈 Cache could be more effective")
+    print(f"   🧮 Transposition table size: {len(engine.transposition_table)}")
+    print(f"   📝 Killer moves stored: {sum(len(moves) for moves in engine.killer_moves)}")
+    print(f"   💡 Cache hit rate: {(engine.cache_hits / engine.nodes_searched * 100):.1f}%")
     
     return move, engine.nodes_searched, engine.cache_hits
 
@@ -115,7 +104,7 @@ def test_move_ordering_sophistication():
     
     # Order the moves
     ordered_moves = order_moves_v4(engine.board, legal_moves, 
-                                  engine.killer_moves[0], engine.history_table)
+                                   engine.killer_moves[0])
     
     print(f"\n🎯 TOP 5 MOVES (by V4.0 sophisticated ordering):")
     for i, move in enumerate(ordered_moves[:5]):
