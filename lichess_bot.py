@@ -144,12 +144,26 @@ class LichessBot:
                 logger.info(f"📊 Rating out of range: {rating} (accepted: {self.min_rating}-{self.max_rating})")
                 return False
         
-        # Don't play UltraBullet (¼+0) as per Lichess bot rules
+        # Fixed time control parsing - don't check for UltraBullet if speed is already classified as blitz/rapid/classical
         time_control = challenge.get('timeControl', {})
+        logger.info(f"🔍 Time control debug: {time_control}, speed: {speed}")
+        
+        # Only reject actual UltraBullet (speed will be 'ultraBullet' from Lichess)
+        if speed == 'ultraBullet':
+            logger.info(f"⚡ UltraBullet not supported")
+            return False
+        
+        # Additional check for very fast time controls that might slip through
         if time_control.get('type') == 'clock':
-            initial_time = time_control.get('limit', 0) / 1000  # Convert to seconds
-            if initial_time < 30:  # Less than 30 seconds initial time
-                logger.info(f"⚡ UltraBullet not supported: {initial_time}s")
+            # Lichess API returns time in seconds, not milliseconds
+            initial_time = time_control.get('limit', 0)
+            increment = time_control.get('increment', 0)
+            
+            logger.info(f"⏰ Time details: {initial_time}s + {increment}s increment")
+            
+            # Only reject if it's truly under 30 seconds total time
+            if initial_time < 15 and increment == 0:  # Very conservative check
+                logger.info(f"⚡ Very fast time control rejected: {initial_time}s")
                 return False
         
         return True
