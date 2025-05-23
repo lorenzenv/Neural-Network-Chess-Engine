@@ -558,9 +558,9 @@ class EngineV4:
             _, cached_score, _, _ = self.transposition_table[current_fen]
             return cached_score
         
-        # Neural network evaluation (core strength)
-        original_fen = self.board.fen()
-        nn_score = evaluate_pos(original_fen, current_fen)
+        # Neural network evaluation (core strength) - FIXED BUG!
+        # Compare the initial position with current position (not current with current!)
+        nn_score = evaluate_pos(self.initial_fen, current_fen)
         
         # Simplified and faster positional factors
         positional_bonus = 0
