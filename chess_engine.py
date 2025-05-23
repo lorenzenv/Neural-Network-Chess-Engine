@@ -172,7 +172,7 @@ class Engine:
 
     def get_move(self):
         best_move = self.make_move()
-            return str(best_move)
+        return str(best_move)
 
     def make_move(self):
         self.nodes_searched = 0
@@ -430,7 +430,7 @@ class Engine:
         best_move = None
         moves_searched = 0
         
-            for move in legal_moves:
+        for move in legal_moves:
             moves_searched += 1
             self.board.push(move)
             
