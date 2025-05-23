@@ -39,14 +39,19 @@ def make_x(first,second):
     x_2 = np.array(x_2, dtype=np.float32).reshape(1,769)
     return x_1, x_2
 
-# evaluate two input positions
+# evaluate two input positions, adjusting score based on whose turn it was in the first FEN
 def evaluate_pos(first, second):
     x_1, x_2 = make_x(first,second)
     interpreter.set_tensor(input_details[0]['index'], x_1)
     interpreter.set_tensor(input_details[1]['index'], x_2)
     interpreter.invoke()
-    evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
-    return evaluation
+    raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
+    
+    # Flip score based on whose turn it is in the first position (like original)
+    board = chess.Board(first)
+    if board.turn == chess.BLACK:
+        return -raw_evaluation
+    return raw_evaluation
 
 def order_moves_v4(board, moves, killer_moves=None):
     """V4 Fast move ordering optimized for speed"""
@@ -182,12 +187,8 @@ class EngineV4:
         self.name = "V4.0 Pure Neural Power"
         self.version = "4.0"
         
-        # Store initial position and determine what color we're playing
+        # Store initial position for neural network comparison
         self.initial_fen = fen
-        initial_board = chess.Board(fen)
-        # If it's white to move in initial position, we're probably playing black
-        # If it's black to move in initial position, we're probably playing white
-        self.playing_as_black = initial_board.turn == chess.WHITE
         
         # Enhanced caching system
         self.transposition_table = {}  # Stores {position: (depth, score, move, node_type)}
@@ -568,42 +569,26 @@ class EngineV4:
         # Compare the initial position with current position
         raw_nn_score = evaluate_pos(self.initial_fen, current_fen)
         
-        # Adjust score based on what color we're playing
-        # The neural network seems to be trained from Black's perspective
-        if self.playing_as_black:
-            nn_score = raw_nn_score  # Use score as-is when playing as Black
-        else:
-            nn_score = -raw_nn_score  # Flip score when playing as White
-        
         # Simplified and faster positional factors
         positional_bonus = 0
         
-        # Quick check bonus/penalty (adjusted for our color)
+        # Quick check bonus/penalty
         if self.board.is_check():
-            if self.playing_as_black:
-                positional_bonus += 30 if self.board.turn == chess.BLACK else -30
-            else:
-                positional_bonus += 30 if self.board.turn == chess.WHITE else -30
+            positional_bonus += 30 if self.board.turn == chess.BLACK else -30
         
-        # Fast material balance (adjusted for our color)
+        # Fast material balance
         material_score = self.quick_material_balance()
-        if not self.playing_as_black:
-            material_score = -material_score  # Flip for White
         
         # Simplified piece activity (just mobility)
         mobility_score = len(list(self.board.legal_moves))
-        if self.playing_as_black:
-            mobility_score = -mobility_score if self.board.turn == chess.WHITE else mobility_score
-        else:
-            mobility_score = mobility_score if self.board.turn == chess.WHITE else -mobility_score
+        if self.board.turn == chess.WHITE:
+            mobility_score = -mobility_score
         
-        # Quick king safety (adjusted for our color)  
+        # Quick king safety
         king_safety = self.quick_king_safety()
-        if not self.playing_as_black:
-            king_safety = -king_safety  # Flip for White
         
         # Combine factors with reduced weights for speed
-        final_score = (nn_score + 
+        final_score = (raw_nn_score + 
                       (positional_bonus * 0.08) + 
                       (material_score * 0.04) + 
                       (mobility_score * 0.02) +
