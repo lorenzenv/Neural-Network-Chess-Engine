@@ -108,9 +108,21 @@ class LichessBot:
         if should_accept:
             try:
                 self.client.bots.accept_challenge(challenge_id)
-                logger.info(f"✅ Accepted challenge from {challenger['name']}")
-            except Exception as e:
-                logger.error(f"❌ Failed to accept challenge: {e}")
+                logger.info(f"✅ Accepted challenge {challenge_id} from {challenger['name']}")
+            except berserk.exceptions.ResponseError as e:
+                # The string representation of berserk.exceptions.ResponseError
+                # usually includes the status code and message, e.g., "HTTP 404: Not Found: ..."
+                if e.response.status_code == 404:
+                    logger.warning(
+                        f"⚠️ Failed to accept challenge {challenge_id} (404 Not Found). "
+                        f"It might have been withdrawn, timed out, or auto-accepted/already started. "
+                        f"Error details: {e}"
+                    )
+                else:
+                    # Log other HTTP errors from berserk more explicitly
+                    logger.error(f"❌ Failed to accept challenge {challenge_id} due to HTTP error: {e}")
+            except Exception as e: # Catch other non-berserk, non-HTTP errors
+                logger.error(f"❌ Failed to accept challenge {challenge_id} with an unexpected error: {e}")
         else:
             try:
                 self.client.bots.decline_challenge(challenge_id)
