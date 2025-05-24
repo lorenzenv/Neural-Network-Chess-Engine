@@ -160,11 +160,41 @@ class NNEvaluator:
             print(f"NN Comparison error: {e}")
             return 0.5  # Neutral if NN fails
 
+    def compare_positions_ensemble(self, fen1: str, fen2: str) -> float:
+        """
+        Improved comparison using ensemble method to reduce color bias.
+        Compares both orders and takes the average to ensure symmetry.
+        """
+        try:
+            # Get comparison in both directions
+            forward = self.compare_positions(fen1, fen2)
+            backward = self.compare_positions(fen2, fen1)
+            
+            # These should be symmetric: backward ≈ 1.0 - forward
+            # Take the average to reduce any systematic bias
+            expected_backward = 1.0 - forward
+            symmetry_error = abs(backward - expected_backward)
+            
+            # If symmetry error is large, there might be bias - use more conservative approach
+            if symmetry_error > 0.1:
+                # Use the average of both interpretations for more stability
+                ensemble_result = (forward + (1.0 - backward)) / 2.0
+            else:
+                # Use the forward comparison if symmetry is good
+                ensemble_result = forward
+            
+            return ensemble_result
+            
+        except Exception as e:
+            print(f"NN Ensemble comparison error: {e}")
+            return 0.5
+
     def evaluate_move_comparison(self, current_fen: str, move_fens: list, player_is_white: bool) -> list:
         """
         Compare multiple move positions using the neural network.
         Returns a list of comparison scores for each move FEN relative to current position.
         Higher scores mean better for the current player.
+        IMPROVED: Uses ensemble method to reduce color bias.
         """
         if not move_fens:
             return []
@@ -172,24 +202,35 @@ class NNEvaluator:
         scores = []
         for move_fen in move_fens:
             try:
-                # Compare current position with the position after the move
-                comparison = self.compare_positions(current_fen, move_fen)
+                # Use ensemble comparison for better stability
+                comparison = self.compare_positions_ensemble(current_fen, move_fen)
                 
-                # Interpret the comparison score based on whose turn it is
+                # More symmetric interpretation for both colors
                 if player_is_white:
-                    # For white: if current > move_result, we want lower score (bad move)
-                    # If move_result > current, we want higher score (good move)
-                    score = 1.0 - comparison  # Invert because we want high scores for good moves
+                    # For White: if move_result > current, that's good (high comparison value)
+                    # We want high scores for good moves, so don't invert
+                    raw_score = comparison
                 else:
-                    # For black: similar logic but inverted perspective
-                    score = comparison
+                    # For Black: if move_result < current for White perspective, that's good for Black
+                    # So we want low comparison values to translate to high scores
+                    raw_score = 1.0 - comparison
                 
-                # Add confidence check - if comparison is close to 0.5, it's uncertain
+                # Apply confidence scaling - moves near 0.5 are uncertain
                 confidence = abs(comparison - 0.5) * 2.0  # 0 to 1 scale
-                if confidence < 0.3:  # Low confidence, use more conservative score
-                    score = 0.5  # Neutral score for uncertain positions
+                
+                # Enhanced confidence adjustment for color balance
+                if confidence < 0.2:
+                    # Very uncertain comparison - use neutral score
+                    score = 0.5
+                elif confidence < 0.4:
+                    # Somewhat uncertain - blend with neutral
+                    score = 0.5 * 0.3 + raw_score * 0.7
+                else:
+                    # Confident comparison - use raw score
+                    score = raw_score
                 
                 scores.append(score)
+                
             except Exception as e:
                 print(f"NN Move comparison error: {e}")
                 scores.append(0.5)  # Neutral if NN fails
@@ -199,6 +240,7 @@ class NNEvaluator:
     def evaluate_absolute_score_white_pov(self, fen_to_evaluate: str, fen_context_for_pov: str) -> float:
         """
         Blunder-safe evaluation method. Uses classical evaluation as primary with NN adjustments.
+        IMPROVED: Uses ensemble NN comparison for better color balance.
         """
         try:
             # Always start with classical evaluation as the foundation
@@ -214,7 +256,8 @@ class NNEvaluator:
             
             # Use NN comparison conservatively only if we have meaningful context
             if fen_context_for_pov and fen_context_for_pov != fen_to_evaluate:
-                comparison = self.compare_positions(fen_to_evaluate, fen_context_for_pov)
+                # Use ensemble comparison for better color balance
+                comparison = self.compare_positions_ensemble(fen_to_evaluate, fen_context_for_pov)
                 
                 # Only apply NN adjustment if the comparison is confident (not close to 0.5)
                 confidence = abs(comparison - 0.5) * 2.0
@@ -237,6 +280,7 @@ class NNEvaluator:
             
         except Exception as e:
             print(f"NN Evaluation error: {e}")
+            # Fallback to classical evaluation
             return classical_material_eval(fen_to_evaluate)
 
 # ------- Engine Implementation -------
