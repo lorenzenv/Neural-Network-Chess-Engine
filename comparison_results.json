@@ -1,0 +1,167 @@
+{
+  "baseline": {
+    "total_score": 62.8,
+    "total_positions": 9,
+    "grade": "C+",
+    "estimated_elo": "2000-2200",
+    "avg_centipawn_loss": 70.3,
+    "breakdown": {
+      "\u26a0\ufe0f  OKAY - Playable, but noticeably weaker.": 1,
+      "\u274c POOR - Significant error.": 3,
+      "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!": 2,
+      "\ud83e\udd48 VERY GOOD - Strong move, very close to optimal.": 2,
+      "\ud83e\udd49 GOOD - Solid move.": 1
+    },
+    "excellence_rate": 22.2,
+    "blunder_rate": 0.0
+  },
+  "enhanced": {
+    "total_score": 59.5,
+    "total_positions": 10,
+    "grade": "C",
+    "estimated_elo": "1400-1600",
+    "avg_centipawn_loss": 9095.6,
+    "breakdown": {
+      "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!": 4,
+      "\ud83d\udca3 BLUNDER - Very serious error.": 3,
+      "\ud83e\udd48 VERY GOOD - Strong move, very close to optimal.": 1,
+      "\u274c POOR - Significant error.": 1,
+      "\ud83e\udd49 GOOD - Solid move.": 1
+    },
+    "excellence_rate": 40.0,
+    "blunder_rate": 30.0
+  },
+  "improvement": -3.299999999999997,
+  "enhanced_details": [
+    {
+      "position": "test1_opening_blacks_reply",
+      "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2",
+      "nn_move": "g8f6",
+      "sf_best_move": "b8c6",
+      "sf_best_eval_display": "+0.39",
+      "nn_move_eval_display": "+0.39",
+      "sf_best_cp_wpov": -39,
+      "nn_move_cp_wpov": -39,
+      "eval_diff_cp": 0,
+      "category": "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!",
+      "status": "OK"
+    },
+    {
+      "position": "test2_middlegame_tactical",
+      "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13",
+      "nn_move": "e5d7",
+      "sf_best_move": "e5d7",
+      "sf_best_eval_display": "+2.81",
+      "nn_move_eval_display": "+2.90",
+      "sf_best_cp_wpov": 281,
+      "nn_move_cp_wpov": 290,
+      "eval_diff_cp": -9,
+      "category": "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!",
+      "status": "OK"
+    },
+    {
+      "position": "test3_endgame_king_pawn",
+      "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1",
+      "nn_move": "d1d2",
+      "sf_best_move": "d1d2",
+      "sf_best_eval_display": "+10.60",
+      "nn_move_eval_display": "+7.07",
+      "sf_best_cp_wpov": 1060,
+      "nn_move_cp_wpov": 707,
+      "eval_diff_cp": 353,
+      "category": "\ud83d\udca3 BLUNDER - Very serious error.",
+      "status": "OK"
+    },
+    {
+      "position": "test4_middlegame_material_imbalance",
+      "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23",
+      "nn_move": "d6f7",
+      "sf_best_move": "d6f7",
+      "sf_best_eval_display": "+4.88",
+      "nn_move_eval_display": "+4.90",
+      "sf_best_cp_wpov": 488,
+      "nn_move_cp_wpov": 490,
+      "eval_diff_cp": -2,
+      "category": "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!",
+      "status": "OK"
+    },
+    {
+      "position": "test5_tactical_pin_black",
+      "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47",
+      "nn_move": "a7a4",
+      "sf_best_move": "a1h1",
+      "sf_best_eval_display": "+3.11",
+      "nn_move_eval_display": "Mate in 9",
+      "sf_best_cp_wpov": -311,
+      "nn_move_cp_wpov": -90000,
+      "eval_diff_cp": 89689,
+      "category": "\ud83d\udca3 BLUNDER - Very serious error.",
+      "status": "OK"
+    },
+    {
+      "position": "test6_endgame_promotion_race",
+      "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48",
+      "nn_move": "h1h2",
+      "sf_best_move": "h1h2",
+      "sf_best_eval_display": "-4.08",
+      "nn_move_eval_display": "-3.81",
+      "sf_best_cp_wpov": 408,
+      "nn_move_cp_wpov": 381,
+      "eval_diff_cp": 27,
+      "category": "\ud83e\udd48 VERY GOOD - Strong move, very close to optimal.",
+      "status": "OK"
+    },
+    {
+      "position": "test7_middlegame_queen_attack",
+      "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29",
+      "nn_move": "b6b5",
+      "sf_best_move": "b6b4",
+      "sf_best_eval_display": "-4.54",
+      "nn_move_eval_display": "+2.48",
+      "sf_best_cp_wpov": 454,
+      "nn_move_cp_wpov": -248,
+      "eval_diff_cp": 702,
+      "category": "\ud83d\udca3 BLUNDER - Very serious error.",
+      "status": "OK"
+    },
+    {
+      "position": "test8_kings_indian_attack",
+      "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6",
+      "nn_move": "h2h3",
+      "sf_best_move": "f1e2",
+      "sf_best_eval_display": "+0.52",
+      "nn_move_eval_display": "+0.52",
+      "sf_best_cp_wpov": 52,
+      "nn_move_cp_wpov": 52,
+      "eval_diff_cp": 0,
+      "category": "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!",
+      "status": "OK"
+    },
+    {
+      "position": "test9_endgame_rook_pawns",
+      "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36",
+      "nn_move": "a6a7",
+      "sf_best_move": "a2a4",
+      "sf_best_eval_display": "+8.24",
+      "nn_move_eval_display": "+6.89",
+      "sf_best_cp_wpov": 824,
+      "nn_move_cp_wpov": 689,
+      "eval_diff_cp": 135,
+      "category": "\u274c POOR - Significant error.",
+      "status": "OK"
+    },
+    {
+      "position": "test10_tactical_fork",
+      "fen": "r1bqkb1r/pppp1ppp/2n2n2/4p3/2B1P3/3P1N2/PPP2PPP/RNBQK2R w KQkq - 4 4",
+      "nn_move": "e1g1",
+      "sf_best_move": "f3g5",
+      "sf_best_eval_display": "+0.88",
+      "nn_move_eval_display": "+0.38",
+      "sf_best_cp_wpov": 88,
+      "nn_move_cp_wpov": 38,
+      "eval_diff_cp": 50,
+      "category": "\ud83e\udd49 GOOD - Solid move.",
+      "status": "OK"
+    }
+  ]
+}

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 🤖 LICHESS BOT
-Advanced chess bot for Lichess using the Neural Chess Engine.
+Advanced chess bot for Lichess using the Pure Neural Network Chess Engine.
 """
 
 import os
@@ -13,7 +13,7 @@ from typing import Dict, Optional, Any
 import chess
 import chess.pgn
 import berserk
-from chess_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from pure_nn_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
 
 # Configure logging
 logging.basicConfig(
@@ -27,7 +27,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 class LichessBot:
-    """Advanced Lichess bot using the Neural Chess Engine"""
+    """Advanced Lichess bot using the Pure Neural Network Chess Engine"""
     
     def __init__(self, token: str):
         """Initialize the Lichess bot"""

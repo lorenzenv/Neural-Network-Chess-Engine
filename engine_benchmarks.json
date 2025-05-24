@@ -1,0 +1,98 @@
+[
+  {
+    "timestamp": "20250525_002545",
+    "engine_version": "2.2.0",
+    "config": {
+      "count": 10,
+      "difficulty": "mixed",
+      "pattern": "all",
+      "sources_used": [
+        "lichess_api",
+        "default",
+        "stockfish_generator"
+      ],
+      "benchmark_mode": false,
+      "tactical_count": 10,
+      "online_count": 5
+    },
+    "results": {
+      "total_score": 16.0,
+      "total_positions": 10,
+      "grade": "F",
+      "estimated_elo": "1400-1600",
+      "avg_centipawn_loss": 14420.1,
+      "breakdown": {
+        "\ud83d\udca3 BLUNDER - Very serious error.": 7,
+        "\u274c POOR - Significant error.": 1,
+        "\u26a0\ufe0f  OKAY - Playable, but noticeably weaker.": 2
+      },
+      "excellence_rate": 0.0,
+      "blunder_rate": 70.0
+    }
+  },
+  {
+    "timestamp": "20250525_002656",
+    "engine_version": "2.2.0",
+    "config": {
+      "count": 5,
+      "difficulty": "mixed",
+      "pattern": "all",
+      "sources_used": [
+        "lichess_api",
+        "default",
+        "stockfish_generator"
+      ],
+      "benchmark_mode": false,
+      "tactical_count": 10,
+      "online_count": 5
+    },
+    "results": {
+      "total_score": 72.0,
+      "total_positions": 5,
+      "grade": "B",
+      "estimated_elo": "2000-2200",
+      "avg_centipawn_loss": 51.6,
+      "breakdown": {
+        "\u26a0\ufe0f  OKAY - Playable, but noticeably weaker.": 1,
+        "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!": 2,
+        "\u274c POOR - Significant error.": 1,
+        "\ud83e\udd48 VERY GOOD - Strong move, very close to optimal.": 1
+      },
+      "excellence_rate": 40.0,
+      "blunder_rate": 0.0
+    }
+  },
+  {
+    "timestamp": "20250525_003033",
+    "engine_version": "2.2.0",
+    "config": {
+      "count": 15,
+      "difficulty": "mixed",
+      "pattern": "all",
+      "sources_used": [
+        "stockfish_generator",
+        "default",
+        "lichess_api"
+      ],
+      "benchmark_mode": false,
+      "tactical_count": 5,
+      "online_count": 5
+    },
+    "results": {
+      "total_score": 71.3,
+      "total_positions": 15,
+      "grade": "B",
+      "estimated_elo": "1400-1600",
+      "avg_centipawn_loss": 6071.5,
+      "breakdown": {
+        "\ud83e\udd49 GOOD - Solid move.": 1,
+        "\ud83d\udca3 BLUNDER - Very serious error.": 3,
+        "\ud83c\udfc6 EXCELLENT - Optimal or near-optimal move!": 8,
+        "\ud83e\udd48 VERY GOOD - Strong move, very close to optimal.": 1,
+        "\u26a0\ufe0f  OKAY - Playable, but noticeably weaker.": 2
+      },
+      "excellence_rate": 53.3,
+      "blunder_rate": 20.0
+    }
+  }
+]
