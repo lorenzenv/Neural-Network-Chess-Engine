@@ -13,6 +13,7 @@ import random
 import sys
 import os
 import logging
+import argparse # Added import
 
 # Configure logging for less verbose output during normal operation
 logging.basicConfig(level=logging.INFO, format='%(message)s') # Simpler format for test output
@@ -44,41 +45,42 @@ except Exception as e:
     sys.exit(1)
 
 def get_stockfish_eval_for_move(fen: str, move_uci: str) -> dict | None:
-    """Gets Stockfish's evaluation for a specific FEN after a given move."""
+    """Gets Stockfish's evaluation for a specific FEN after a given move using search-based evaluation."""
     try:
         board = chess.Board(fen)
         move = chess.Move.from_uci(move_uci)
         if move not in board.legal_moves:
-            return {"type": "illegal", "value": None, "display": "Illegal Move"}
+            return {"type": "illegal", "value_cp": None, "display": "Illegal Move"}
         
         board.push(move)
+        
+        # Use the same search-based evaluation method as get_stockfish_best_move_eval
         stockfish.set_fen_position(board.fen())
-        eval_data = stockfish.get_evaluation()
-
-        # Stockfish eval is for the position *after* the move, from current player's perspective.
-        # We want the value of the move *itself* from the perspective of the player who *made* the move.
-        # So, if it's White's turn in 'fen', and White makes 'move_uci', then eval_data is for Black's turn.
-        # If eval_data['value'] is +100 (good for current player, Black), it means White's move was bad.
-        # Thus, we need to flip the sign for centipawn values.
+        top_move_info = stockfish.get_top_moves(1)
         
+        if not top_move_info:
+            # Position might be terminal or Stockfish couldn't find moves
+            return {"type": "draw", "value_cp": 0, "display": "Draw/Terminal"}
+        
+        eval_data = top_move_info[0]  # Get eval from the position after the move
+        
+        # This eval is from the perspective of the current player (opponent of the original mover)
+        # We want it from the original mover's perspective, so flip the sign
         display_eval = ""
-        value_cp = None # Represents the value of the move from the original player's perspective
+        value_cp = None
 
-        if eval_data['type'] == 'cp':
-            value_cp = -eval_data['value'] # Flip sign
+        if eval_data['Mate'] is not None:
+            value_cp = eval_data['Mate'] * 10000  # No sign flip
+            if eval_data['Mate'] > 0:  # Positive mate value
+                display_eval = f"Mate in {eval_data['Mate']}"
+            else:  # Negative mate value  
+                display_eval = f"Mated in {abs(eval_data['Mate'])}"
+        elif eval_data['Centipawn'] is not None:
+            value_cp = eval_data['Centipawn']  # No sign flip
             display_eval = f"{value_cp / 100.0:+.2f}"
-        elif eval_data['type'] == 'mate':
-            # If positive, it's mate FOR the current player (opponent of mover)
-            # So, if eval_data['value'] = 1, it means opponent can mate in 1. This is bad for mover.
-            # If negative, it's mate BY the current player (opponent of mover)
-            # So, if eval_data['value'] = -1, it means opponent is mated in 1. This is good for mover.
-            value_cp = -eval_data['value'] * 10000 # Assign large value, flip sign
-            if eval_data['value'] > 0: # Opponent will mate
-                display_eval = f"Mated in {eval_data['value']}"
-            else: # Opponent is mated
-                display_eval = f"Mate in {abs(eval_data['value'])}"
         
-        return {"type": eval_data['type'], "value_cp": value_cp, "display": display_eval, "original_sf_value": eval_data['value']}
+        return {"type": "cp" if eval_data['Mate'] is None else "mate", 
+                "value_cp": value_cp, "display": display_eval}
 
     except Exception as e:
         logger.error(f"Error getting Stockfish eval for move {move_uci} on FEN {fen}: {e}")
@@ -197,15 +199,29 @@ def test_position(fen: str, position_name: str, results_summary: list):
             performance_category = "⚠️  POOR - Gets mated faster or avoids best losing line."
     # Centipawn comparison if no decisive mates are involved for SF's best move
     elif sf_best_move_data['value_cp'] is not None and nn_move_eval_data['value_cp'] is not None:
-        eval_diff_cp = sf_best_move_data['value_cp'] - nn_move_eval_data['value_cp']
         
-        # Adjust for player to move (SF eval is always from player-to-move's perspective)
-        # No, both value_cp are now from original player-to-move's perspective.
-        
-        logger.info(f"   SF Best Eval (CP): {sf_best_move_data['value_cp']:.0f}, NN Move Eval (CP): {nn_move_eval_data['value_cp']:.0f}")
-        logger.info(f"   Evaluation difference (SF_best - NN_move): {eval_diff_cp:.0f} cp")
+        # Ensure both evaluations are from White's Point of View (WPOV) for consistent comparison
+        sf_best_cp_wpov = sf_best_move_data['value_cp']
+        nn_move_cp_wpov = nn_move_eval_data['value_cp']
+        current_player_is_black = (board.turn == chess.BLACK)
 
-        if eval_diff_cp <= 10: # Effectively same or better
+        # The *_move_data['value_cp'] fields are from the perspective of the player whose turn it was at the original FEN.
+        # So, if it was Black's turn, a positive value_cp is good for Black.
+        # For WPOV comparison, we need to negate Black's scores.
+        if current_player_is_black:
+            sf_best_cp_wpov = -sf_best_cp_wpov
+            nn_move_cp_wpov = -nn_move_cp_wpov
+
+        eval_diff_cp = sf_best_cp_wpov - nn_move_cp_wpov # Difference of WPOV scores
+        
+        logger.info(f"   SF Best Eval (WPOV CP): {sf_best_cp_wpov:.0f}, NN Move Eval (WPOV CP): {nn_move_cp_wpov:.0f}")
+        logger.info(f"   Evaluation difference (SF_best_WPOV - NN_move_WPOV): {eval_diff_cp:.0f} cp")
+
+        # Thresholds are based on the magnitude of loss relative to SF's WPOV best.
+        # A positive eval_diff_cp means SF's best (WPOV) was better than NN's move (WPOV).
+        # A negative eval_diff_cp means NN's move (WPOV) was better than SF's best (WPOV).
+
+        if eval_diff_cp <= 10: # NN is same or better (or negligibly worse)
             performance_category = "🏆 EXCELLENT - Optimal or near-optimal move!"
         elif eval_diff_cp <= 30:
             performance_category = "🥈 VERY GOOD - Strong move, very close to optimal."
@@ -227,10 +243,11 @@ def test_position(fen: str, position_name: str, results_summary: list):
         'fen': fen,
         'nn_move': neural_move_uci,
         'sf_best_move': sf_best_move_data['move_uci'],
-        'sf_best_eval_display': sf_best_move_data['display'],
+        # Store original display values, but WPOV cp values for consistent summary calculation
+        'sf_best_eval_display': sf_best_move_data['display'], 
         'nn_move_eval_display': nn_move_eval_data['display'],
-        'sf_best_cp': sf_best_move_data['value_cp'],
-        'nn_move_cp': nn_move_eval_data['value_cp'],
+        'sf_best_cp_wpov': sf_best_cp_wpov if 'sf_best_cp_wpov' in locals() else sf_best_move_data.get('value_cp'), # fallback for mate cases
+        'nn_move_cp_wpov': nn_move_cp_wpov if 'nn_move_cp_wpov' in locals() else nn_move_eval_data.get('value_cp'), # fallback for mate cases
         'eval_diff_cp': eval_diff_cp,
         'category': performance_category,
         'status': 'OK'
@@ -239,6 +256,10 @@ def test_position(fen: str, position_name: str, results_summary: list):
 
 def main():
     logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")
+
+    parser = argparse.ArgumentParser(description="Test neural network move selection quality against Stockfish.")
+    parser.add_argument("--test", type=int, metavar="N", help="Run only a specific test number (e.g., 7 for test7_...).")
+    args = parser.parse_args()
     
     test_positions = [
         {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"},
@@ -254,7 +275,23 @@ def main():
     
     overall_results_summary = []
     
-    for position_data in test_positions:
+    test_positions_to_run = test_positions
+    if args.test is not None:
+        target_test_prefix = f"test{args.test}_"
+        selected_tests = [p for p in test_positions if p['name'].startswith(target_test_prefix)]
+        if not selected_tests:
+            logger.error(f"❌ Test number {args.test} (looking for prefix '{target_test_prefix}') not found in defined tests.")
+            logger.info("Available test names are:")
+            for p in test_positions:
+                logger.info(f"  - {p['name']}")
+            sys.exit(1)
+        if len(selected_tests) > 1:
+             logger.warning(f"⚠️ Multiple tests found with prefix '{target_test_prefix}'. Running the first one: {selected_tests[0]['name']}")
+        test_positions_to_run = [selected_tests[0]] # Run only the first match
+        logger.info(f"🎯 Running only specified test: {test_positions_to_run[0]['name']}")
+
+
+    for position_data in test_positions_to_run:
         test_position(position_data['fen'], position_data['name'], overall_results_summary)
     
     # Summary
@@ -283,7 +320,8 @@ def main():
         }
         
         successful_tests = 0
-        total_eval_diff = 0
+        total_eval_diff_cp = 0
+        valid_comparisons = 0
 
         for r in overall_results_summary:
             if r['status'] == 'OK':
@@ -291,18 +329,24 @@ def main():
                 if r['category'] in categories_count:
                     categories_count[r['category']] += 1
                 if r['eval_diff_cp'] is not None and not ("mate" in r['sf_best_eval_display'].lower() or "mate" in r['nn_move_eval_display'].lower()): # Only average non-mate situations
-                    total_eval_diff += r['eval_diff_cp']
+                    total_eval_diff_cp += r['eval_diff_cp']
+                    valid_comparisons += 1
                 
-                logger.info(f"  Pos: {r['position'][:30]:<30} | NN: {r['nn_move']:<7} (Eval: {r['nn_move_eval_display']:>8}) | SF: {r['sf_best_move']:<7} (Eval: {r['sf_best_eval_display']:>8}) | Diff: {(str(int(r['eval_diff_cp']))+'cp') if r['eval_diff_cp'] is not None else 'N/A':>7} | Result: {r['category']}")
+                logger.info(f"  Pos: {r['position'][:30]:<30} | NN: {r['nn_move']:<7} (WPOV Eval: {r['nn_move_cp_wpov']/100.0 if r['nn_move_cp_wpov'] is not None else 'N/A':>8}) | SF: {r['sf_best_move']:<7} (WPOV Eval: {r['sf_best_cp_wpov']/100.0 if r['sf_best_cp_wpov'] is not None else 'N/A':>8}) | Diff: {(str(int(r['eval_diff_cp']))+'cp') if r['eval_diff_cp'] is not None else 'N/A':>7} | Result: {r['category']}")
 
         if successful_tests > 0:
             non_mate_diffs = [r['eval_diff_cp'] for r in overall_results_summary if r['status'] == 'OK' and r['eval_diff_cp'] is not None and not ("mate" in r['sf_best_eval_display'].lower() or "mate" in r['nn_move_eval_display'].lower())]
             if non_mate_diffs:
                  average_eval_diff = sum(non_mate_diffs) / len(non_mate_diffs)
-                 logger.info(f"\nAverage Evaluation Difference (SF_best - NN_move, non-mate positions): {average_eval_diff:.0f} cp")
+                 logger.info(f"\nAverage Evaluation Difference (SF_best_WPOV - NN_move_WPOV, non-mate positions): {average_eval_diff:.0f} cp")
             else:
                 logger.info("\nNo non-mate positions with comparable centipawn evaluations to average.")
 
+        if valid_comparisons > 0:
+            average_diff_cp = total_eval_diff_cp / valid_comparisons
+            logger.info(f"\nAverage Evaluation Difference (SF_best_WPOV - NN_move_WPOV, non-mate positions): {average_diff_cp:.0f} cp")
+        else:
+            logger.info("\nNo valid centipawn comparisons were made.")
 
         logger.info("\nCategory Counts:")
         for cat, count in categories_count.items():

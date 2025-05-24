@@ -125,21 +125,21 @@ class NNEvaluator:
         interpreter.set_tensor(input_details[0]['index'], x_context_np) 
         interpreter.set_tensor(input_details[1]['index'], x_evaluate_np)
         interpreter.invoke()
-        # raw_evaluation is P(player_to_move_in_context_fen wins | board is now fen_to_evaluate)
+        # raw_evaluation is P(player_to_move_in_fen_to_evaluate wins | board is now fen_to_evaluate)
         raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0] 
         
-        # Score from the perspective of the player whose turn it was in fen_context_for_pov
-        unscaled_score_from_context_player_pov = (float(raw_evaluation) - 0.5)
+        # Score from the perspective of the player whose turn it is in fen_to_evaluate
+        unscaled_score_from_evaluate_player_pov = (float(raw_evaluation) - 0.5)
 
-        active_color_in_context = fen_context_for_pov.split()[1]
+        active_color_in_evaluate = fen_to_evaluate.split()[1]
         
-        final_score_wpov = unscaled_score_from_context_player_pov * Config.NN_SCALING_FACTOR
-        if active_color_in_context == 'b': # If Black was to move in context_fen, raw_eval was Black's P(win)
+        final_score_wpov = unscaled_score_from_evaluate_player_pov * Config.NN_SCALING_FACTOR
+        if active_color_in_evaluate == 'b': # If Black is to move in fen_to_evaluate, raw_eval was Black's P(win)
             final_score_wpov *= -1 # Negate to get White's POV
             
         # ---- START DEBUG (Example, adjust if needed) ----
         # if True: # Config.NN_SCALING_FACTOR > 1.0:
-        #     print(f"DEBUG ABS_EVAL: eval_fen={fen_to_evaluate.split()[0]} ctx_fen={fen_context_for_pov.split()[0]} raw={raw_evaluation:.4f} unscaled_ctx_pov={unscaled_score_from_context_player_pov:.4f} final_wpov={final_score_wpov:.2f} ctx_color={active_color_in_context}")
+        #     print(f"DEBUG ABS_EVAL: eval_fen={fen_to_evaluate.split()[0]} ctx_fen={fen_context_for_pov.split()[0]} raw={raw_evaluation:.4f} unscaled_eval_pov={unscaled_score_from_evaluate_player_pov:.4f} final_wpov={final_score_wpov:.2f} eval_color={active_color_in_evaluate}")
         # ---- END DEBUG ----
         return final_score_wpov
 
