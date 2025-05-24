@@ -51,7 +51,10 @@ class LichessBot:
         self.max_rating = 2800  # Maximum opponent rating
         
         logger.info(f"🤖 Initialized {self.engine_name} v{self.engine_version}")
-        logger.info(f"✨ Features: {', '.join(ENGINE_FEATURES)}")
+        if ENGINE_FEATURES:
+            logger.info(f"✨ Features: {', '.join(ENGINE_FEATURES)}")
+        else:
+            logger.info(f"✨ Features: Pure Neural Network Evaluation")
     
     def start(self):
         """Start the bot and begin listening for events"""
@@ -197,11 +200,12 @@ class LichessBot:
         
         logger.info(f"🎮 Game started: {game_id} as {color} vs {opponent}")
         
-        # Store game info
+        # Store initial FEN for proper game reconstruction
         self.active_games[game_id] = {
             'color': color,
             'opponent': opponent,
             'board': chess.Board(),
+            'initial_fen': chess.STARTING_FEN,  # Will be updated in handle_game_full
             'engine': None,
             'move_count': 0
         }
@@ -264,8 +268,10 @@ class LichessBot:
         initial_fen = event.get('initialFen', 'startpos')
         if initial_fen == 'startpos':
             game_info['board'] = chess.Board()
+            game_info['initial_fen'] = chess.STARTING_FEN
         else:
             game_info['board'] = chess.Board(initial_fen)
+            game_info['initial_fen'] = initial_fen
         
         # Process initial moves
         state = event.get('state', {})
@@ -293,9 +299,8 @@ class LichessBot:
         game_info = self.active_games[game_id]
         board = game_info['board']
         
-        # Reset to starting position
-        initial_fen = board.starting_fen if hasattr(board, 'starting_fen') else chess.STARTING_FEN
-        board.set_fen(initial_fen)
+        # Reset to starting position using the stored initial FEN
+        board.set_fen(game_info['initial_fen'])
         
         # Apply all moves
         moves = moves_str.split()
@@ -352,22 +357,18 @@ class LichessBot:
             game_info = self.active_games[game_id]
             board = game_info['board']
             
-            logger.info(f"🧠 Calculating move for game {game_id} (move {game_info['move_count'] + 1})")
+            logger.info(f"🧠 Calculating move for game {game_id} (move {game_info['move_count'] + 1}) - Position: {board.fen().split()[0]}")
             
-            # Initialize engine for this position
-            if game_info['engine'] is None:
-                # Pass the bot's color to the engine
-                # The new Engine class determines color from FEN, bot_color parameter is not used by Engine itself
-                # but lichess_bot uses game_info['color'] to know its own playing color.
-                game_info['engine'] = Engine(board.fen())
-            else:
-                # Update engine with current position
-                game_info['engine'].board.set_fen(board.fen())
+            # Create a fresh engine instance for this position to avoid state corruption
+            # (transposition table, killer moves, etc. from previous positions)
+            game_info['engine'] = Engine(board.fen())
             
             # Get move from Neural Chess Engine
             start_time = time.time()
             move_str = game_info['engine'].get_move()
             calc_time = time.time() - start_time
+            
+            logger.info(f"🎯 Engine calculated: {move_str} in {calc_time:.2f}s")
             
             if move_str == "checkmate":
                 logger.info(f"😵 No legal moves in game {game_id} - resigning")
