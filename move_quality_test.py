@@ -16,7 +16,7 @@ import chess
 import chess.pgn
 import chess.engine
 from stockfish import Stockfish
-from chess_engine import Engine
+from pure_nn_engine import Engine
 import random
 import sys
 import os
@@ -962,6 +962,154 @@ def fetch_recent_lichess_positions(count: int = 10) -> List[Dict]:
     logger.info(f"✅ Fetched {len(positions)} recent Lichess positions")
     return positions
 
+def calculate_strength_score(results_summary: list) -> dict:
+    """Calculate a comprehensive strength score from test results"""
+    if not results_summary:
+        return {"total_score": 0, "breakdown": {}, "grade": "N/A"}
+    
+    valid_results = [r for r in results_summary if r['status'] == 'OK']
+    if not valid_results:
+        return {"total_score": 0, "breakdown": {}, "grade": "N/A"}
+    
+    # Scoring system based on move quality categories
+    category_scores = {
+        "🏆 EXCELLENT - Optimal or near-optimal move!": 100,
+        "🏆 EXCELLENT - Found optimal mate!": 100,
+        "🥈 VERY GOOD - Strong move, very close to optimal.": 85,
+        "🥉 GOOD - Solid move.": 70,
+        "🥈 GOOD - Found a mate, but slower than optimal.": 75,
+        "⚠️  OKAY - Playable, but noticeably weaker.": 50,
+        "✅ OKAY - Gets mated, but optimally delays or chooses same losing line.": 45,
+        "❌ POOR - Significant error.": 25,
+        "❌ POOR - Missed a forced mate.": 20,
+        "⚠️  POOR - Gets mated faster or avoids best losing line.": 15,
+        "💣 BLUNDER - Very serious error.": 5,
+        "💣 BLUNDER - Plays into a mate.": 0,
+        "❓ UNKNOWN": 30
+    }
+    
+    total_score = 0
+    category_breakdown = {}
+    
+    for result in valid_results:
+        category = result.get('category', '❓ UNKNOWN')
+        score = category_scores.get(category, 30)
+        total_score += score
+        category_breakdown[category] = category_breakdown.get(category, 0) + 1
+    
+    # Calculate average score (0-100 scale)
+    average_score = total_score / len(valid_results) if valid_results else 0
+    
+    # Assign letter grades
+    if average_score >= 90:
+        grade = "A+"
+    elif average_score >= 85:
+        grade = "A"
+    elif average_score >= 80:
+        grade = "A-"
+    elif average_score >= 75:
+        grade = "B+"
+    elif average_score >= 70:
+        grade = "B"
+    elif average_score >= 65:
+        grade = "B-"
+    elif average_score >= 60:
+        grade = "C+"
+    elif average_score >= 55:
+        grade = "C"
+    elif average_score >= 50:
+        grade = "C-"
+    elif average_score >= 40:
+        grade = "D"
+    else:
+        grade = "F"
+    
+    # Calculate ELO estimate (rough approximation)
+    # Based on centipawn loss correlation with rating
+    non_mate_results = [r for r in valid_results if r.get('eval_diff_cp') is not None]
+    avg_centipawn_loss = 0
+    if non_mate_results:
+        total_cp_loss = sum(max(0, r['eval_diff_cp']) for r in non_mate_results)
+        avg_centipawn_loss = total_cp_loss / len(non_mate_results)
+    
+    # Rough ELO estimate based on average centipawn loss
+    # Professional studies show ~50cp loss = ~400 ELO difference from perfect play
+    if avg_centipawn_loss <= 20:
+        estimated_elo = "2600+"
+    elif avg_centipawn_loss <= 35:
+        estimated_elo = "2400-2600"
+    elif avg_centipawn_loss <= 50:
+        estimated_elo = "2200-2400"
+    elif avg_centipawn_loss <= 75:
+        estimated_elo = "2000-2200"
+    elif avg_centipawn_loss <= 100:
+        estimated_elo = "1800-2000"
+    elif avg_centipawn_loss <= 150:
+        estimated_elo = "1600-1800"
+    else:
+        estimated_elo = "1400-1600"
+    
+    return {
+        "total_score": round(average_score, 1),
+        "total_positions": len(valid_results),
+        "grade": grade,
+        "estimated_elo": estimated_elo,
+        "avg_centipawn_loss": round(avg_centipawn_loss, 1),
+        "breakdown": category_breakdown,
+        "excellence_rate": round(sum(1 for r in valid_results if "EXCELLENT" in r.get('category', '')) / len(valid_results) * 100, 1),
+        "blunder_rate": round(sum(1 for r in valid_results if "BLUNDER" in r.get('category', '')) / len(valid_results) * 100, 1)
+    }
+
+def save_benchmark_results(score_data: dict, config: dict, timestamp: str = None):
+    """Save benchmark results for comparison tracking"""
+    if timestamp is None:
+        import datetime
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    
+    benchmark_file = Path("engine_benchmarks.json")
+    
+    # Load existing benchmarks
+    benchmarks = []
+    if benchmark_file.exists():
+        try:
+            with open(benchmark_file, 'r') as f:
+                benchmarks = json.load(f)
+        except:
+            benchmarks = []
+    
+    # Add new benchmark
+    new_benchmark = {
+        "timestamp": timestamp,
+        "engine_version": "2.2.0",  # From chess_engine.py
+        "config": config,
+        "results": score_data
+    }
+    
+    benchmarks.append(new_benchmark)
+    
+    # Keep only last 50 benchmarks
+    benchmarks = benchmarks[-50:]
+    
+    # Save updated benchmarks
+    with open(benchmark_file, 'w') as f:
+        json.dump(benchmarks, f, indent=2)
+    
+    logger.info(f"💾 Benchmark saved to {benchmark_file}")
+    
+    # Show improvement comparison if previous benchmarks exist
+    if len(benchmarks) > 1:
+        prev_benchmark = benchmarks[-2]
+        prev_score = prev_benchmark['results']['total_score']
+        curr_score = score_data['total_score']
+        
+        improvement = curr_score - prev_score
+        if improvement > 0:
+            logger.info(f"📈 Improvement: +{improvement:.1f} points from previous benchmark")
+        elif improvement < 0:
+            logger.info(f"📉 Regression: {improvement:.1f} points from previous benchmark")
+        else:
+            logger.info(f"🔄 No change from previous benchmark")
+
 def main():
     logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")
 
@@ -981,6 +1129,7 @@ def main():
                        help="Specific tactical pattern to focus on")
     parser.add_argument("--save-results", help="Save detailed results to JSON file")
     parser.add_argument("--benchmark", action="store_true", help="Run comprehensive benchmark with all position types")
+    parser.add_argument("--track-improvement", action="store_true", help="Save results for tracking improvements over time")
     args = parser.parse_args()
     
     # Handle setup command
@@ -1172,6 +1321,30 @@ def main():
             else:
                 logger.info("\nOverall: ⚠️ Room for improvement, struggles with consistency.")
 
+        # Calculate comprehensive strength score
+        strength_data = calculate_strength_score(overall_results_summary)
+        
+        logger.info(f"\n🏆 ENGINE STRENGTH ASSESSMENT")
+        logger.info(f"{'='*50}")
+        logger.info(f"Overall Score: {strength_data['total_score']}/100 (Grade: {strength_data['grade']})")
+        logger.info(f"Estimated Playing Strength: {strength_data['estimated_elo']} ELO")
+        logger.info(f"Average Centipawn Loss: {strength_data['avg_centipawn_loss']} cp")
+        logger.info(f"Excellence Rate: {strength_data['excellence_rate']}%")
+        logger.info(f"Blunder Rate: {strength_data['blunder_rate']}%")
+        
+        # Save benchmark results if requested
+        if args.track_improvement or args.benchmark:
+            config_used = {
+                'count': args.count,
+                'difficulty': args.difficulty,
+                'pattern': args.pattern,
+                'sources_used': list(source_performance.keys()) if source_performance else [],
+                'benchmark_mode': args.benchmark,
+                'tactical_count': args.tactical,
+                'online_count': args.online
+            }
+            save_benchmark_results(strength_data, config_used)
+
         # Save results if requested
         if args.save_results:
             try:
@@ -1184,6 +1357,7 @@ def main():
                             'sources_used': list(source_performance.keys()) if source_performance else [],
                             'benchmark_mode': args.benchmark
                         },
+                        'strength_assessment': strength_data,
                         'summary': {
                             'total_positions': total_tests,
                             'average_eval_diff_cp': average_diff_cp if valid_comparisons > 0 else None,

@@ -1,5 +1,5 @@
 from flask import Flask, render_template, jsonify, request
-from chess_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from pure_nn_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
 
 app = Flask(__name__)
 
@@ -28,7 +28,7 @@ def get_move():
         
         print(f"🧠 Calculating move for position: {fen}")
         
-        # Create engine (defaulting to black for web interface)
+        # Create pure NN engine  
         engine = Engine(fen)
         move = engine.get_move()
         
