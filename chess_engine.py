@@ -2,8 +2,15 @@ import chess
 import numpy as np
 import functools
 import time
-import tensorflow.lite as tflite
-from util import make_bitboard, beautifyFEN # Make sure util.py is accessible
+import tflite_runtime.interpreter as tflite
+from util import * # Changed from specific imports to wildcard
+
+# Global model loading
+interpreter = tflite.Interpreter(model_path="model.tflite")
+interpreter.allocate_tensors()
+# These are global lists of dictionaries
+input_details = interpreter.get_input_details()
+output_details = interpreter.get_output_details()
 
 # ------- Engine Metadata -------
 ENGINE_NAME = "AdvSearch++ Pure NN Eval"
@@ -106,19 +113,21 @@ def make_x_cached(fen_cur: str, fen_par: str):
 
 # ------- NN Evaluator -------
 class NNEvaluator:
-    def __init__(self, model_path: str):
-        self.interpreter = tflite.Interpreter(model_path=model_path)
-        self.interpreter.allocate_tensors()
-        self.input1_details, self.input2_details = self.interpreter.get_input_details()
-        self.output_details = self.interpreter.get_output_details()[0]
+    def __init__(self): # model_path argument removed
+        # Interpreter is now global, no need to initialize here
+        pass
 
     def evaluate_single_delta_white_pov(self, fen_current: str, fen_parent: str) -> float:
         x1_np, x2_np = make_x_cached(fen_current, fen_parent)
         
-        self.interpreter.set_tensor(self.input1_details['index'], x1_np)
-        self.interpreter.set_tensor(self.input2_details['index'], x2_np)
-        self.interpreter.invoke()
-        raw_evaluation = self.interpreter.get_tensor(self.output_details['index'])[0][0]
+        # Use global interpreter and details
+        # input_details[0] for the first input tensor
+        # input_details[1] for the second input tensor
+        # output_details[0] for the output tensor
+        interpreter.set_tensor(input_details[0]['index'], x1_np)
+        interpreter.set_tensor(input_details[1]['index'], x2_np)
+        interpreter.invoke()
+        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
         
         scaled_delta_for_white = (float(raw_evaluation) - 0.5) * Config.NN_SCALING_FACTOR
         
@@ -136,7 +145,7 @@ class Engine:
         self.board = chess.Board(fen)
         self.zobrist_hasher = ZobristHash()
         self.tt = FixedTT()
-        self.nn_evaluator = NNEvaluator(model_path)
+        self.nn_evaluator = NNEvaluator() # Changed: No longer passes model_path
 
         self.start_time_for_move = None
         self.time_limit_for_move = Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE
