@@ -2,13 +2,20 @@ import chess
 import numpy as np
 import functools
 import time
-import tflite_runtime.interpreter as tflite
 from util import * # Changed from specific imports to wildcard
 
-# Global model loading
-interpreter = tflite.Interpreter(model_path="model.tflite")
+try:
+    from tflite_runtime.interpreter import Interpreter
+except ImportError:
+    import tensorflow as tf
+    Interpreter = tf.lite.Interpreter
+
+from util import *  # or your specific imports
+
+# global model loading
+interpreter = Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
-# These are global lists of dictionaries
+
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
@@ -118,18 +125,35 @@ class NNEvaluator:
         pass
 
     def evaluate_single_delta_white_pov(self, fen_current: str, fen_parent: str) -> float:
-        x1_np, x2_np = make_x_cached(fen_current, fen_parent)
+        # Corrected call to match NN training input order: (parent, current)
+        # x_parent_np is bitboard for fen_parent, x_current_np is bitboard for fen_current
+        x_parent_np, x_current_np = make_x_cached(fen_parent, fen_current)
         
         # Use global interpreter and details
-        # input_details[0] for the first input tensor
-        # input_details[1] for the second input tensor
+        # input_details[0] for the parent input tensor
+        # input_details[1] for the current input tensor
         # output_details[0] for the output tensor
-        interpreter.set_tensor(input_details[0]['index'], x1_np)
-        interpreter.set_tensor(input_details[1]['index'], x2_np)
+        interpreter.set_tensor(input_details[0]['index'], x_parent_np) # NN input 0 gets parent
+        interpreter.set_tensor(input_details[1]['index'], x_current_np) # NN input 1 gets current
         interpreter.invoke()
-        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0]
+        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0] # P(mover from parent to current wins)
         
-        scaled_delta_for_white = (float(raw_evaluation) - 0.5) * Config.NN_SCALING_FACTOR
+        unscaled_delta = (float(raw_evaluation) - 0.5) # Positive if move was good for the mover
+
+        # Determine whose move it was from fen_parent to fen_current
+        # fen_parent is like "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+        # The second field is the active color.
+        active_color_in_parent = fen_parent.split()[1]
+
+        scaled_delta_for_white: float
+        if active_color_in_parent == 'w':
+            # White made the move from parent to current.
+            # unscaled_delta is from White's POV.
+            scaled_delta_for_white = unscaled_delta * Config.NN_SCALING_FACTOR
+        else: # active_color_in_parent == 'b'
+            # Black made the move from parent to current.
+            # unscaled_delta is from Black's POV. Negate for White's POV.
+            scaled_delta_for_white = -unscaled_delta * Config.NN_SCALING_FACTOR
         
         # ---- START DEBUG (Uncomment selectively for debugging) ----
         # if "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq" in fen_parent and Config.NN_SCALING_FACTOR > 1.0:
@@ -290,10 +314,13 @@ class Engine:
                 if alpha >= beta: return tt_score_current_player_pov
 
         if self.board.is_checkmate(): return -100000.0 + ply_count 
-        if self.board.is_stalemate() or self.board.is_insufficient_material(): return 0.0 
+        if self.board.is_stalemate() or self.board.is_insufficient_material(): return 0.0
+
+        # FEN of the current node, to be used as parent_fen_for_delta for its children
+        fen_of_current_node = self.board.fen()
 
         current_node_abs_score_white_pov = parent_abs_white_pov + \
-            self.nn_evaluator.evaluate_single_delta_white_pov(self.board.fen(), parent_fen_for_delta)
+            self.nn_evaluator.evaluate_single_delta_white_pov(fen_of_current_node, parent_fen_for_delta)
         
         # ---- START DEBUG ----
         # if ply_count < 3 and Config.NN_SCALING_FACTOR > 1.0 :
@@ -312,9 +339,9 @@ class Engine:
         if can_do_nmp:
             self.board.push(chess.Move.null())
             # Parent for NMP child is current node (null-moved), its score is current_node_abs_score_white_pov
-            score = -self.alpha_beta(depth_remaining - 1 - Config.NMP_REDUCTION, -beta, -alpha, 
-                                     self.board.fen(), current_node_abs_score_white_pov, 
-                                     False, ply_count + 1) 
+            score = -self.alpha_beta(depth_remaining - 1 - Config.NMP_REDUCTION, -beta, -alpha,
+                                     fen_of_current_node, current_node_abs_score_white_pov,
+                                     False, ply_count + 1)
             self.board.pop()
             if score >= beta: 
                 self.nmp_cutoffs +=1
@@ -340,7 +367,7 @@ class Engine:
 
             if i == 0 or not is_pv_node: 
                 current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, -beta, -alpha,
-                                                                self.board.fen(), current_node_abs_score_white_pov,
+                                                                fen_of_current_node, current_node_abs_score_white_pov,
                                                                 is_pv_node, # Child is PV only if parent is PV and it's the first move
                                                                 ply_count + 1)
             else: 
@@ -352,18 +379,18 @@ class Engine:
                     self.lmr_activations += 1
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth - Config.LMR_REDUCTION, 
                                                                     -alpha -1, -alpha, 
-                                                                    self.board.fen(), current_node_abs_score_white_pov,
+                                                                    fen_of_current_node, current_node_abs_score_white_pov,
                                                                     False, ply_count + 1)
                 else: # If LMR not applicable (e.g. capture, promo, check, or too shallow/few moves tried)
                       # Still do a null-window search if it's not the first move of a PV line
                      current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, 
                                                                     -alpha -1, -alpha, 
-                                                                    self.board.fen(), current_node_abs_score_white_pov,
+                                                                    fen_of_current_node, current_node_abs_score_white_pov,
                                                                     False, ply_count + 1)
 
                 if current_move_score_from_child_pov > alpha and current_move_score_from_child_pov < beta : 
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, -beta, -alpha,
-                                                                    self.board.fen(), current_node_abs_score_white_pov,
+                                                                    fen_of_current_node, current_node_abs_score_white_pov,
                                                                     True, ply_count + 1) 
             self.board.pop()
 
@@ -426,15 +453,17 @@ class Engine:
         ordered_q_moves = [item[1] for item in q_moves_with_scores]
 
         if not ordered_q_moves or ply_count >= Config.MAX_PLY_FOR_KILLERS + Config.QUIESCENCE_MAX_DEPTH_RELATIVE :
-            return stand_pat_current_player_pov 
+            return stand_pat_current_player_pov
 
-        best_val_current_player_pov = stand_pat_current_player_pov 
+        best_val_current_player_pov = stand_pat_current_player_pov
+        fen_at_this_q_level = self.board.fen() # FEN before iterating q_moves
 
         for move in ordered_q_moves:
             self.board.push(move)
-            # Child's parent_fen is current_q_node's fen, child's parent_abs_white_pov is current_q_node's stand_pat_score_white_pov
-            score = -self.quiescence(-beta, -alpha, 
-                                     self.board.fen(), stand_pat_score_white_pov, 
+            # Child's parent_fen is current_q_node's fen (fen_at_this_q_level),
+            # child's parent_abs_white_pov is current_q_node's stand_pat_score_white_pov (score of fen_at_this_q_level)
+            score = -self.quiescence(-beta, -alpha,
+                                     fen_at_this_q_level, stand_pat_score_white_pov,
                                      ply_count + 1)
             self.board.pop()
             
