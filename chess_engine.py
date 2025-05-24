@@ -20,8 +20,8 @@ input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
 
 # ------- Engine Metadata -------
-ENGINE_NAME = "AdvSearch++ Pure NN Eval"
-ENGINE_VERSION = "1.9.3-PVSFix" # Version increment
+ENGINE_NAME = "valibot"
+ENGINE_VERSION = "1.0.0"
 ENGINE_FEATURES = []
 
 # ------- Configuration -------
@@ -275,6 +275,7 @@ class Engine:
         if ply_count > 0 and (self.board.can_claim_threefold_repetition() or self.board.is_fifty_moves()):
             return 0.0 
 
+        # Re-enable transposition table
         tt_entry = self.tt.lookup(current_node_zobrist_key)
         tt_best_move_uci = None
         if tt_entry:
@@ -320,7 +321,8 @@ class Engine:
             self.board.push(move)
             
             is_giving_check = self.board.is_check() 
-            extension = 1 if is_giving_check else 0
+            extension = 0  # Temporarily disable check extensions
+            # extension = 1 if is_giving_check else 0
             child_search_depth = depth_remaining - 1 + extension
             
             current_move_score_from_child_pov = 0 
@@ -347,14 +349,8 @@ class Engine:
 
                 # If null-window search failed high, re-search with full window (PVS)
                 if current_move_score_from_child_pov > alpha and current_move_score_from_child_pov < beta : 
-                    # This re-search aims to establish a new PV, so is_pv_node should be True.
-                    # However, if the original node (self) was not PV, a child cannot become PV in this PVS re-search logic.
-                    # The standard PVS re-search is only done if the parent itself is a PV node.
-                    # For simplicity and to avoid changing PV status too aggressively deep in non-PV lines,
-                    # we can pass `False` here, or `is_pv_node` (meaning only re-search as PV if parent was PV).
-                    # Let's stick to only becoming a PV node if the parent was also a PV node.
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, -beta, -alpha,
-                                                                    root_fen_for_nn_context, is_pv_node, ply_count + 1) 
+                                                                    root_fen_for_nn_context, is_pv_node, ply_count + 1)
             self.board.pop()
 
             if current_move_score_from_child_pov > value_from_current_player_pov:
