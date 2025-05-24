@@ -25,21 +25,36 @@ interpreter_lock = threading.Lock()
 
 # ------- Engine Metadata -------
 ENGINE_NAME = "valibot"
-ENGINE_VERSION = "1.0.0"
-ENGINE_FEATURES = []
+ENGINE_VERSION = "2.0.0"
+ENGINE_FEATURES = ["Comparison Model Neural Network", "Hybrid NN-Classical Evaluation", "Alpha-Beta Search"]
 
 # ------- Configuration -------
 class Config:
+    # Speed Mode: "fast", "balanced", "strong"
+    SPEED_MODE = "fast"  # Default to fast for Lichess play
+    
     NN_SCALING_FACTOR = 1000.0
     MAX_PLY_FOR_KILLERS = 30
-    QUIESCENCE_MAX_DEPTH_RELATIVE = 5
+    QUIESCENCE_MAX_DEPTH_RELATIVE = 3  # Reduced from 5
     LMR_MIN_MOVES_TRIED = 3 # Number of full-depth/PV moves to try before LMR can activate
     LMR_REDUCTION = 1       # Depth reduction for LMR moves
     NMP_REDUCTION = 3
-    TT_SIZE_POWER = 22 # 2^22 entries (approx 4 million)
-    FEN_CACHE_SIZE = 4096
-    MAX_SEARCH_DEPTH_ID = 8
-    ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 20.0 # Max time for the entire get_move call
+    TT_SIZE_POWER = 20 # Reduced from 22 for memory efficiency
+    FEN_CACHE_SIZE = 2048  # Reduced from 4096 for faster lookups
+    
+    # Speed-dependent settings
+    if SPEED_MODE == "fast":
+        MAX_SEARCH_DEPTH_ID = 6  # Maintain depth 6 for accuracy
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 3.0  # Fast but not too fast
+        NN_EVALUATION_BLEND = 0.9  # More NN weight for speed
+    elif SPEED_MODE == "balanced":
+        MAX_SEARCH_DEPTH_ID = 6
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 5.0
+        NN_EVALUATION_BLEND = 0.8
+    else:  # "strong"
+        MAX_SEARCH_DEPTH_ID = 8
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 15.0
+        NN_EVALUATION_BLEND = 0.7
 
 # ------- Piece values for MVV-LVA -------
 PIECE_VALUES = {
@@ -160,7 +175,7 @@ class NNEvaluator:
             
             # Blend with classical evaluation for stability
             classic_cp = classical_material_eval(fen_to_evaluate)
-            final_score_wpov = 0.7 * nn_score_wpov + 0.3 * classic_cp
+            final_score_wpov = Config.NN_EVALUATION_BLEND * nn_score_wpov + (1 - Config.NN_EVALUATION_BLEND) * classic_cp
             
             return final_score_wpov
             
