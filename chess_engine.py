@@ -2,6 +2,7 @@ import chess
 import numpy as np
 import functools
 import time
+import threading
 from util import * # Changed from specific imports to wildcard
 
 try:
@@ -12,12 +13,15 @@ except ImportError:
 
 from util import *  # or your specific imports
 
-# global model loading
+# global model loading with thread safety
 interpreter = Interpreter(model_path="model.tflite")
 interpreter.allocate_tensors()
 
 input_details = interpreter.get_input_details()
 output_details = interpreter.get_output_details()
+
+# Thread lock for interpreter access
+interpreter_lock = threading.Lock()
 
 # ------- Engine Metadata -------
 ENGINE_NAME = "valibot"
@@ -34,7 +38,7 @@ class Config:
     NMP_REDUCTION = 3
     TT_SIZE_POWER = 22 # 2^22 entries (approx 4 million)
     FEN_CACHE_SIZE = 4096
-    MAX_SEARCH_DEPTH_ID = 6
+    MAX_SEARCH_DEPTH_ID = 8
     ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 20.0 # Max time for the entire get_move call
 
 # ------- Piece values for MVV-LVA -------
@@ -116,32 +120,54 @@ class NNEvaluator:
         # Interpreter is now global, no need to initialize here
         pass
 
+    def compare_positions(self, fen1: str, fen2: str) -> float:
+        """Compare two positions. Returns value between 0 and 1.
+        1.0 means fen1 is more winning for white than fen2
+        0.0 means fen2 is more winning for white than fen1
+        """
+        try:
+            x1_np, x2_np = make_x_cached(fen1, fen2)
+            x1_copy = np.copy(x1_np)
+            x2_copy = np.copy(x2_np)
+            
+            with interpreter_lock:
+                interpreter.set_tensor(input_details[0]['index'], x1_copy) 
+                interpreter.set_tensor(input_details[1]['index'], x2_copy)
+                interpreter.invoke()
+                raw_comparison = float(interpreter.get_tensor(output_details[0]['index'])[0][0])
+            
+            return raw_comparison
+            
+        except Exception as e:
+            print(f"NN Comparison error: {e}")
+            return 0.5  # Neutral if NN fails
+
     # Returns an absolute score for fen_to_evaluate from White's POV,
     # using fen_context_for_pov to determine the player perspective for the raw NN output.
     def evaluate_absolute_score_white_pov(self, fen_to_evaluate: str, fen_context_for_pov: str) -> float:
-        # NN expects (context_board, board_to_evaluate)
-        x_context_np, x_evaluate_np = make_x_cached(fen_context_for_pov, fen_to_evaluate)
-        
-        interpreter.set_tensor(input_details[0]['index'], x_context_np) 
-        interpreter.set_tensor(input_details[1]['index'], x_evaluate_np)
-        interpreter.invoke()
-        # raw_evaluation is P(player_to_move_in_fen_to_evaluate wins | board is now fen_to_evaluate)
-        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0] 
-        
-        # Score from the perspective of the player whose turn it is in fen_to_evaluate
-        unscaled_score_from_evaluate_player_pov = (float(raw_evaluation) - 0.5)
-
-        active_color_in_evaluate = fen_to_evaluate.split()[1]
-        
-        final_score_wpov = unscaled_score_from_evaluate_player_pov * Config.NN_SCALING_FACTOR
-        if active_color_in_evaluate == 'b': # If Black is to move in fen_to_evaluate, raw_eval was Black's P(win)
-            final_score_wpov *= -1 # Negate to get White's POV
+        try:
+            # For comparison model, we need to compare against some reference positions
+            # Let's use the starting position as a neutral reference
+            starting_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
             
-        # ---- START DEBUG (Example, adjust if needed) ----
-        # if True: # Config.NN_SCALING_FACTOR > 1.0:
-        #     print(f"DEBUG ABS_EVAL: eval_fen={fen_to_evaluate.split()[0]} ctx_fen={fen_context_for_pov.split()[0]} raw={raw_evaluation:.4f} unscaled_eval_pov={unscaled_score_from_evaluate_player_pov:.4f} final_wpov={final_score_wpov:.2f} eval_color={active_color_in_evaluate}")
-        # ---- END DEBUG ----
-        return final_score_wpov
+            # Compare current position to starting position
+            comparison_score = self.compare_positions(fen_to_evaluate, starting_fen)
+            
+            # Convert to white POV score
+            # If comparison_score > 0.5, current position is better for white than starting position
+            # If comparison_score < 0.5, current position is worse for white than starting position
+            nn_score_wpov = (comparison_score - 0.5) * Config.NN_SCALING_FACTOR * 2
+            
+            # Blend with classical evaluation for stability
+            classic_cp = classical_material_eval(fen_to_evaluate)
+            final_score_wpov = 0.7 * nn_score_wpov + 0.3 * classic_cp
+            
+            return final_score_wpov
+            
+        except Exception as e:
+            # Log error and return classical evaluation as fallback
+            print(f"NN Evaluation error: {e}")
+            return classical_material_eval(fen_to_evaluate)
 
 # ------- Engine Implementation -------
 class Engine:
@@ -204,6 +230,9 @@ class Engine:
             elif move.promotion == chess.QUEEN: score = 1500000
             elif move.promotion: score = PIECE_VALUES.get(move.promotion, 300) * 1000 
             elif self.board.gives_check(move): score = 500000
+            elif self.board.is_castling(move): score = 300000  # Castling is usually good
+            else:
+                score = 100000  # modest bonus for quiet non-forcing moves
             move_scores.append((score, move))
         move_scores.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in move_scores]
@@ -429,3 +458,16 @@ class Engine:
             if alpha >= beta: break 
         
         return best_val_current_player_pov
+
+def classical_material_eval(fen: str) -> int:
+    board = chess.Board(fen)
+    MATERIAL_VALUES = {chess.PAWN: 100, chess.KNIGHT: 320, chess.BISHOP: 330,
+                       chess.ROOK: 500, chess.QUEEN: 900}
+    score = 0
+    
+    # Basic material count only
+    for square, piece in board.piece_map().items():
+        value = MATERIAL_VALUES.get(piece.piece_type, 0)
+        score += value if piece.color == chess.WHITE else -value
+    
+    return score
