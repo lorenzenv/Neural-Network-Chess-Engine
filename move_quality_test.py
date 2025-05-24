@@ -673,6 +673,99 @@ def test_position(fen: str, position_name: str, results_summary: list):
         'status': 'OK'
     })
 
+def test_speed_modes(fen: str, position_name: str):
+    """Test the same position with different speed modes"""
+    logger.info(f"\n🏃 SPEED MODE TESTING: {position_name}")
+    logger.info(f"FEN: {fen}")
+    
+    speed_modes = ["fast", "balanced", "strong"]
+    results = {}
+    
+    for mode in speed_modes:
+        logger.info(f"\n--- Testing {mode.upper()} mode ---")
+        
+        # Temporarily modify the speed mode in chess_engine.py
+        import importlib
+        import chess_engine
+        
+        # Store original values
+        original_mode = chess_engine.Config.SPEED_MODE
+        original_time_limit = chess_engine.Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE
+        original_depth = chess_engine.Config.MAX_SEARCH_DEPTH_ID
+        original_blend = chess_engine.Config.NN_EVALUATION_BLEND
+        
+        try:
+            # Set new speed mode
+            chess_engine.Config.SPEED_MODE = mode
+            if mode == "fast":
+                chess_engine.Config.MAX_SEARCH_DEPTH_ID = 6
+                chess_engine.Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 3.0
+                chess_engine.Config.NN_EVALUATION_BLEND = 0.9
+            elif mode == "balanced":
+                chess_engine.Config.MAX_SEARCH_DEPTH_ID = 6
+                chess_engine.Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 5.0
+                chess_engine.Config.NN_EVALUATION_BLEND = 0.8
+            else:  # strong
+                chess_engine.Config.MAX_SEARCH_DEPTH_ID = 8
+                chess_engine.Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 15.0
+                chess_engine.Config.NN_EVALUATION_BLEND = 0.7
+            
+            # Test the position
+            start_time = time.time()
+            engine = chess_engine.Engine(fen)
+            neural_move_uci = engine.get_move()
+            total_time = time.time() - start_time
+            
+            # Get Stockfish evaluation
+            sf_best_move_data = get_stockfish_best_move_eval(fen)
+            nn_move_eval_data = get_stockfish_eval_for_move(fen, neural_move_uci)
+            
+            eval_diff = None
+            if (sf_best_move_data and nn_move_eval_data and 
+                sf_best_move_data.get('value_cp') is not None and 
+                nn_move_eval_data.get('value_cp') is not None):
+                
+                board = chess.Board(fen)
+                current_player_is_black = (board.turn == chess.BLACK)
+                
+                sf_best_cp_wpov = sf_best_move_data['value_cp']
+                nn_move_cp_wpov = nn_move_eval_data['value_cp']
+                
+                if current_player_is_black:
+                    sf_best_cp_wpov = -sf_best_cp_wpov
+                    nn_move_cp_wpov = -nn_move_cp_wpov
+                
+                eval_diff = sf_best_cp_wpov - nn_move_cp_wpov
+            
+            results[mode] = {
+                'move': neural_move_uci,
+                'time': total_time,
+                'sf_best': sf_best_move_data['move_uci'] if sf_best_move_data else None,
+                'eval_diff': eval_diff
+            }
+            
+            logger.info(f"  Move: {neural_move_uci}")
+            logger.info(f"  Time: {total_time:.2f}s")
+            logger.info(f"  SF Best: {sf_best_move_data['move_uci'] if sf_best_move_data else 'N/A'}")
+            logger.info(f"  Eval diff: {eval_diff:.0f}cp" if eval_diff is not None else "  Eval diff: N/A")
+            
+        finally:
+            # Restore original values
+            chess_engine.Config.SPEED_MODE = original_mode
+            chess_engine.Config.ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = original_time_limit
+            chess_engine.Config.MAX_SEARCH_DEPTH_ID = original_depth
+            chess_engine.Config.NN_EVALUATION_BLEND = original_blend
+    
+    # Summary
+    logger.info(f"\n📊 Speed Mode Comparison:")
+    logger.info(f"{'-'*50}")
+    
+    for mode, data in results.items():
+        eval_str = f"{data['eval_diff']:.0f}cp" if data['eval_diff'] is not None else "N/A"
+        logger.info(f"{mode:<10} {data['move']:<8} {data['time']:<6.1f}s {data['sf_best']:<8} {eval_str:<10}")
+    
+    return results
+
 def setup_test_databases():
     """Download and setup real chess test databases"""
     logger.info("🔧 Setting up real chess test databases...")
@@ -768,6 +861,106 @@ def setup_test_databases():
         logger.error(f"❌ Setup failed: {e}")
     
     return setup_dir
+
+def fetch_recent_lichess_positions(count: int = 10) -> List[Dict]:
+    """Fetch recent positions from real Lichess games"""
+    positions = []
+    
+    try:
+        import requests
+        import tempfile
+        import os
+        
+        logger.info(f"🌐 Fetching {count} recent positions from Lichess...")
+        
+        # Get recent games from various strong players
+        players = ['hikaru', 'daniil_dubov', 'liem_chess', 'penguingm1', 'grandelius', 'firouzja2003']
+        
+        for player in players[:3]:  # Limit API calls
+            try:
+                url = f"https://lichess.org/api/games/user/{player}"
+                params = {
+                    'max': 3,
+                    'rated': 'true',
+                    'perfType': 'blitz,rapid,classical',
+                    'format': 'pgn'
+                }
+                
+                headers = {'Accept': 'application/x-ndjson'}
+                response = requests.get(url, params=params, headers=headers, timeout=15)
+                
+                if response.status_code == 200 and response.text.strip():
+                    # Split by double newline to get individual games
+                    games = response.text.strip().split('\n\n\n')
+                    
+                    for game_text in games[:2]:  # Max 2 games per player
+                        if not game_text.strip():
+                            continue
+                            
+                        try:
+                            # Parse the game
+                            import io
+                            game_io = io.StringIO(game_text)
+                            game = chess.pgn.read_game(game_io)
+                            
+                            if game is None:
+                                continue
+                                
+                            board = game.board()
+                            move_count = 0
+                            
+                            # Extract interesting positions from the game
+                            for move in game.mainline_moves():
+                                move_count += 1
+                                board.push(move)
+                                
+                                # Focus on middlegame positions (moves 10-30)
+                                if 10 <= move_count <= 30:
+                                    piece_count = len(board.piece_map())
+                                    
+                                    # Select positions with good piece activity
+                                    if piece_count >= 20 and not board.is_game_over():
+                                        positions.append({
+                                            'name': f'lichess_{player}_move{move_count}',
+                                            'fen': board.fen(),
+                                            'source': 'lichess_recent',
+                                            'player': player,
+                                            'move_number': move_count,
+                                            'game_info': {
+                                                'white': game.headers.get('White', 'Unknown'),
+                                                'black': game.headers.get('Black', 'Unknown'),
+                                                'result': game.headers.get('Result', '*'),
+                                                'event': game.headers.get('Event', 'Lichess'),
+                                                'time_control': game.headers.get('TimeControl', 'Unknown')
+                                            }
+                                        })
+                                        
+                                        if len(positions) >= count:
+                                            break
+                                
+                                if len(positions) >= count:
+                                    break
+                                    
+                        except Exception as e:
+                            logger.debug(f"Error parsing game from {player}: {e}")
+                            continue
+                            
+                time.sleep(1)  # Rate limiting
+                
+                if len(positions) >= count:
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"Error fetching games from {player}: {e}")
+                continue
+                
+    except ImportError:
+        logger.warning("requests module required for Lichess API")
+    except Exception as e:
+        logger.warning(f"Error fetching recent Lichess positions: {e}")
+        
+    logger.info(f"✅ Fetched {len(positions)} recent Lichess positions")
+    return positions
 
 def main():
     logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")

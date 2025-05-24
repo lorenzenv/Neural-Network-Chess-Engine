@@ -25,8 +25,8 @@ interpreter_lock = threading.Lock()
 
 # ------- Engine Metadata -------
 ENGINE_NAME = "valibot"
-ENGINE_VERSION = "2.0.0"
-ENGINE_FEATURES = ["Comparison Model Neural Network", "Hybrid NN-Classical Evaluation", "Alpha-Beta Search"]
+ENGINE_VERSION = "2.2.0"
+ENGINE_FEATURES = ["Corrected Neural Network Evaluation", "Proper Bitboard Conversion", "Hybrid NN-Classical Evaluation", "Alpha-Beta Search"]
 
 # ------- Configuration -------
 class Config:
@@ -35,26 +35,29 @@ class Config:
     
     NN_SCALING_FACTOR = 1000.0
     MAX_PLY_FOR_KILLERS = 30
-    QUIESCENCE_MAX_DEPTH_RELATIVE = 3  # Reduced from 5
+    QUIESCENCE_MAX_DEPTH_RELATIVE = 4  # Increased from 3 for better tactical vision
     LMR_MIN_MOVES_TRIED = 3 # Number of full-depth/PV moves to try before LMR can activate
     LMR_REDUCTION = 1       # Depth reduction for LMR moves
     NMP_REDUCTION = 3
     TT_SIZE_POWER = 20 # Reduced from 22 for memory efficiency
     FEN_CACHE_SIZE = 2048  # Reduced from 4096 for faster lookups
     
-    # Speed-dependent settings
+    # Speed-dependent settings - Improved for better performance
     if SPEED_MODE == "fast":
-        MAX_SEARCH_DEPTH_ID = 6  # Maintain depth 6 for accuracy
-        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 3.0  # Fast but not too fast
-        NN_EVALUATION_BLEND = 0.9  # More NN weight for speed
+        MAX_SEARCH_DEPTH_ID = 8  # Increased from 6 for better tactical play
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 4.0  # Slightly increased for depth
+        NN_EVALUATION_BLEND = 0.8  # More balanced approach
+        SEARCH_TIME_EXTENSION_FACTOR = 1.5  # Allow extension for critical positions
     elif SPEED_MODE == "balanced":
-        MAX_SEARCH_DEPTH_ID = 6
-        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 5.0
-        NN_EVALUATION_BLEND = 0.8
+        MAX_SEARCH_DEPTH_ID = 10
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 8.0
+        NN_EVALUATION_BLEND = 0.75
+        SEARCH_TIME_EXTENSION_FACTOR = 2.0
     else:  # "strong"
-        MAX_SEARCH_DEPTH_ID = 8
-        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 15.0
+        MAX_SEARCH_DEPTH_ID = 12
+        ITERATIVE_DEEPENING_TIME_LIMIT_PER_MOVE = 20.0
         NN_EVALUATION_BLEND = 0.7
+        SEARCH_TIME_EXTENSION_FACTOR = 3.0
 
 # ------- Piece values for MVV-LVA -------
 PIECE_VALUES = {
@@ -122,8 +125,8 @@ class FixedTT:
 # ------- Cached FEN to Bitboard Conversion -------
 @functools.lru_cache(maxsize=Config.FEN_CACHE_SIZE)
 def make_x_cached(fen_1: str, fen_2: str): # Changed param names for clarity
-    b1 = make_bitboard(beautifyFEN(fen_1))
-    b2 = make_bitboard(beautifyFEN(fen_2))
+    b1 = bitifyFEN(beautifyFEN(fen_1))
+    b2 = bitifyFEN(beautifyFEN(fen_2))
     return (
         np.array(b1, dtype=np.float32).reshape(1, 769),
         np.array(b2, dtype=np.float32).reshape(1, 769)
@@ -131,7 +134,7 @@ def make_x_cached(fen_1: str, fen_2: str): # Changed param names for clarity
 
 # ------- NN Evaluator -------
 class NNEvaluator:
-    def __init__(self): # model_path argument removed
+    def __init__(self):
         # Interpreter is now global, no need to initialize here
         pass
 
@@ -157,30 +160,82 @@ class NNEvaluator:
             print(f"NN Comparison error: {e}")
             return 0.5  # Neutral if NN fails
 
-    # Returns an absolute score for fen_to_evaluate from White's POV,
-    # using fen_context_for_pov to determine the player perspective for the raw NN output.
+    def evaluate_move_comparison(self, current_fen: str, move_fens: list, player_is_white: bool) -> list:
+        """
+        Compare multiple move positions using the neural network.
+        Returns a list of comparison scores for each move FEN relative to current position.
+        Higher scores mean better for the current player.
+        """
+        if not move_fens:
+            return []
+        
+        scores = []
+        for move_fen in move_fens:
+            try:
+                # Compare current position with the position after the move
+                comparison = self.compare_positions(current_fen, move_fen)
+                
+                # Interpret the comparison score based on whose turn it is
+                if player_is_white:
+                    # For white: if current > move_result, we want lower score (bad move)
+                    # If move_result > current, we want higher score (good move)
+                    score = 1.0 - comparison  # Invert because we want high scores for good moves
+                else:
+                    # For black: similar logic but inverted perspective
+                    score = comparison
+                
+                # Add confidence check - if comparison is close to 0.5, it's uncertain
+                confidence = abs(comparison - 0.5) * 2.0  # 0 to 1 scale
+                if confidence < 0.3:  # Low confidence, use more conservative score
+                    score = 0.5  # Neutral score for uncertain positions
+                
+                scores.append(score)
+            except Exception as e:
+                print(f"NN Move comparison error: {e}")
+                scores.append(0.5)  # Neutral if NN fails
+        
+        return scores
+
     def evaluate_absolute_score_white_pov(self, fen_to_evaluate: str, fen_context_for_pov: str) -> float:
+        """
+        Blunder-safe evaluation method. Uses classical evaluation as primary with NN adjustments.
+        """
         try:
-            # For comparison model, we need to compare against some reference positions
-            # Let's use the starting position as a neutral reference
-            starting_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-            
-            # Compare current position to starting position
-            comparison_score = self.compare_positions(fen_to_evaluate, starting_fen)
-            
-            # Convert to white POV score
-            # If comparison_score > 0.5, current position is better for white than starting position
-            # If comparison_score < 0.5, current position is worse for white than starting position
-            nn_score_wpov = (comparison_score - 0.5) * Config.NN_SCALING_FACTOR * 2
-            
-            # Blend with classical evaluation for stability
+            # Always start with classical evaluation as the foundation
             classic_cp = classical_material_eval(fen_to_evaluate)
-            final_score_wpov = Config.NN_EVALUATION_BLEND * nn_score_wpov + (1 - Config.NN_EVALUATION_BLEND) * classic_cp
             
-            return final_score_wpov
+            # Check for obviously bad positions (large material disadvantage)
+            board = chess.Board(fen_to_evaluate)
+            if board.is_checkmate():
+                return -10000.0 if board.turn == chess.WHITE else 10000.0
+            
+            if board.is_stalemate() or board.is_insufficient_material():
+                return 0.0
+            
+            # Use NN comparison conservatively only if we have meaningful context
+            if fen_context_for_pov and fen_context_for_pov != fen_to_evaluate:
+                comparison = self.compare_positions(fen_to_evaluate, fen_context_for_pov)
+                
+                # Only apply NN adjustment if the comparison is confident (not close to 0.5)
+                confidence = abs(comparison - 0.5) * 2.0
+                if confidence > 0.2:  # Only use NN if reasonably confident
+                    # Convert comparison to small adjustment factor (-100 to +100 cp)
+                    nn_adjustment = (comparison - 0.5) * 200 * confidence
+                    
+                    # Apply conservative adjustment - never more than 20% of classical eval
+                    max_adjustment = abs(classic_cp) * 0.2 if classic_cp != 0 else 50
+                    nn_adjustment = max(-max_adjustment, min(max_adjustment, nn_adjustment))
+                    
+                    final_score = classic_cp + nn_adjustment
+                else:
+                    final_score = classic_cp
+            else:
+                final_score = classic_cp
+            
+            # Stricter bounds to prevent extreme evaluations
+            return max(-1500, min(1500, final_score))
             
         except Exception as e:
-            # Log error and return classical evaluation as fallback
             print(f"NN Evaluation error: {e}")
             return classical_material_eval(fen_to_evaluate)
 
@@ -204,7 +259,14 @@ class Engine:
 
     def time_is_up(self) -> bool:
         if self.start_time_for_move is None: return False
-        return (time.time() - self.start_time_for_move) >= self.time_limit_for_move
+        elapsed = time.time() - self.start_time_for_move
+        
+        # Allow extra time for critical positions (checks, captures, tactics)
+        time_limit = self.time_limit_for_move
+        if self.board.is_check() or len(list(self.board.legal_moves)) <= 3:
+            time_limit *= Config.SEARCH_TIME_EXTENSION_FACTOR
+        
+        return elapsed >= time_limit
 
     def get_move(self) -> str:
         best_move_uci, _ = self.iterative_deepening_search()
@@ -227,28 +289,87 @@ class Engine:
                 if tt_move_obj not in legal_moves: tt_move_obj = None
             except ValueError: tt_move_obj = None
 
-        for move in legal_moves:
+        # Safer approach: Only use NN ordering for very simple cases
+        use_nn_ordering = False  # Disabled for now to prevent illegal moves
+        nn_scores = []
+        
+        # Commented out NN ordering until we can fix the illegal move issue
+        # if use_nn_ordering:
+        #     try:
+        #         current_fen = self.board.fen()
+        #         move_fens = []
+        #         
+        #         # Generate FENs for each move
+        #         for move in legal_moves:
+        #             self.board.push(move)
+        #             move_fens.append(self.board.fen())
+        #             self.board.pop()
+        #         
+        #         # Get NN comparison scores
+        #         nn_scores = self.nn_evaluator.evaluate_move_comparison(
+        #             current_fen, move_fens, self.board.turn == chess.WHITE
+        #         )
+        #     except Exception as e:
+        #         print(f"NN ordering error: {e}")
+        #         use_nn_ordering = False
+        #         nn_scores = []
+
+        for i, move in enumerate(legal_moves):
             score = 0
-            if move == tt_move_obj: score = 10000000 
+            
+            # Highest priority: TT move
+            if move == tt_move_obj: 
+                score = 10000000
+            # Second priority: Captures (MVV-LVA)
             elif self.board.is_capture(move):
                 score = 2000000 
                 victim_type = chess.PAWN 
-                if self.board.is_en_passant(move): victim_type = chess.PAWN
+                if self.board.is_en_passant(move): 
+                    victim_type = chess.PAWN
                 else:
                     victim_piece_obj = self.board.piece_at(move.to_square)
-                    if victim_piece_obj: victim_type = victim_piece_obj.piece_type
+                    if victim_piece_obj: 
+                        victim_type = victim_piece_obj.piece_type
                 attacker_piece_obj = self.board.piece_at(move.from_square)
                 attacker_type = attacker_piece_obj.piece_type if attacker_piece_obj else chess.PAWN
                 score += (PIECE_VALUES.get(victim_type, 0) * 100) - PIECE_VALUES.get(attacker_type, 100)
+            # Third priority: Promotions
+            elif move.promotion == chess.QUEEN: 
+                score = 1500000
+            elif move.promotion: 
+                score = PIECE_VALUES.get(move.promotion, 300) * 1000
+            # Fourth priority: Killer moves
             elif ply_count < Config.MAX_PLY_FOR_KILLERS and move in self.killer_moves[ply_count]:
                 score = 1000000 if move == self.killer_moves[ply_count][0] else 900000
-            elif move.promotion == chess.QUEEN: score = 1500000
-            elif move.promotion: score = PIECE_VALUES.get(move.promotion, 300) * 1000 
-            elif self.board.gives_check(move): score = 500000
-            elif self.board.is_castling(move): score = 300000  # Castling is usually good
+            # Fifth priority: Checks and castling
+            elif self.board.gives_check(move): 
+                score = 500000
+            elif self.board.is_castling(move): 
+                score = 300000
+            # Central moves and piece development (simple heuristics)
             else:
-                score = 100000  # modest bonus for quiet non-forcing moves
+                from_square = move.from_square
+                to_square = move.to_square
+                
+                # Bonus for central squares
+                center_bonus = 0
+                center_squares = [chess.E4, chess.E5, chess.D4, chess.D5]
+                if to_square in center_squares:
+                    center_bonus = 5000
+                
+                # Bonus for piece development 
+                piece = self.board.piece_at(from_square)
+                development_bonus = 0
+                if piece and piece.piece_type in [chess.KNIGHT, chess.BISHOP]:
+                    if piece.color == chess.WHITE and from_square in [chess.B1, chess.C1, chess.F1, chess.G1]:
+                        development_bonus = 3000
+                    elif piece.color == chess.BLACK and from_square in [chess.B8, chess.C8, chess.F8, chess.G8]:
+                        development_bonus = 3000
+                
+                score = 100000 + center_bonus + development_bonus
+                
             move_scores.append((score, move))
+        
         move_scores.sort(key=lambda item: item[0], reverse=True)
         return [item[1] for item in move_scores]
 
@@ -365,8 +486,9 @@ class Engine:
             self.board.push(move)
             
             is_giving_check = self.board.is_check() 
-            extension = 0  # Temporarily disable check extensions
-            # extension = 1 if is_giving_check else 0
+            # Simplified extension logic - only extend checks
+            extension = 1 if is_giving_check and depth_remaining >= 2 else 0
+                
             child_search_depth = depth_remaining - 1 + extension
             
             current_move_score_from_child_pov = 0 
@@ -377,11 +499,17 @@ class Engine:
                                                                 is_pv_node, # Child is PV only if parent is PV and it's the first move
                                                                 ply_count + 1)
             else: # Subsequent moves, PVS / LMR logic
-                # LMR for non-PV moves or non-first moves in PV node (already handled by i > 0)
-                if child_search_depth >= Config.LMR_REDUCTION and \
-                   i >= Config.LMR_MIN_MOVES_TRIED and \
-                   not extension and not self.board.is_capture(move) and not move.promotion:
-                    
+                # Conservative LMR to avoid missing tactics
+                can_reduce = (
+                    child_search_depth >= Config.LMR_REDUCTION and 
+                    i >= Config.LMR_MIN_MOVES_TRIED and 
+                    not extension and 
+                    not self.board.is_capture(move) and 
+                    not move.promotion and
+                    ply_count >= 3  # Don't reduce near root
+                )
+                
+                if can_reduce:
                     self.lmr_activations += 1
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth - Config.LMR_REDUCTION, 
                                                                     -alpha -1, -alpha, 
@@ -480,9 +608,46 @@ def classical_material_eval(fen: str) -> int:
                        chess.ROOK: 500, chess.QUEEN: 900}
     score = 0
     
-    # Basic material count only
+    # Basic material count
     for square, piece in board.piece_map().items():
         value = MATERIAL_VALUES.get(piece.piece_type, 0)
         score += value if piece.color == chess.WHITE else -value
+    
+    # Basic safety checks to prevent obvious blunders
+    # Penalize hanging pieces heavily
+    for color in [chess.WHITE, chess.BLACK]:
+        multiplier = 1 if color == chess.WHITE else -1
+        
+        # Check for undefended pieces
+        for square in chess.SQUARES:
+            piece = board.piece_at(square)
+            if piece and piece.color == color:
+                if piece.piece_type != chess.PAWN:  # Don't check pawns
+                    attackers = board.attackers(not color, square)
+                    defenders = board.attackers(color, square)
+                    
+                    if attackers and len(attackers) > len(defenders):
+                        # Hanging piece penalty
+                        penalty = MATERIAL_VALUES.get(piece.piece_type, 0) // 2
+                        score -= penalty * multiplier
+    
+    # King safety - heavily penalize exposed kings
+    for color in [chess.WHITE, chess.BLACK]:
+        king_square = board.king(color)
+        if king_square is not None:
+            multiplier = 1 if color == chess.WHITE else -1
+            enemy_color = not color
+            
+            # Count enemy attacks around king
+            king_zone_attacks = 0
+            for offset in [-9, -8, -7, -1, 1, 7, 8, 9]:
+                target_square = king_square + offset
+                if 0 <= target_square < 64:
+                    if board.is_attacked_by(enemy_color, target_square):
+                        king_zone_attacks += 1
+            
+            # Penalty for exposed king
+            if king_zone_attacks >= 3:
+                score -= (king_zone_attacks * 15) * multiplier
     
     return score

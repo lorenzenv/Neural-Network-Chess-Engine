@@ -37,3 +37,8 @@ Meaning: P(fen_1 is more winning for White than fen_2)
 Values close to 1.0 mean fen_1 is significantly better for White than fen_2
 Values close to 0.0 mean fen_2 is significantly better for White than fen_1
 Values close to 0.5 mean the positions are roughly equal from White's perspective
+
+
+IMPORTANT:
+
+Do not do short cuts like write your own fen starting positions or ignore the NN. This project is soley about showing the strength of the NN. Nothing else matters. 

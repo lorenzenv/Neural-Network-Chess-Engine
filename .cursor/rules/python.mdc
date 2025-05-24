@@ -1,0 +1,6 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+you have to use "python3 script_name.py" instead of "python script_name.py" when running commands and also "conda activate chess" if you haven't already
