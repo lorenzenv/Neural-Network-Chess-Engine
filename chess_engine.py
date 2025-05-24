@@ -22,15 +22,7 @@ output_details = interpreter.get_output_details()
 # ------- Engine Metadata -------
 ENGINE_NAME = "AdvSearch++ Pure NN Eval"
 ENGINE_VERSION = "1.9.3-PVSFix" # Version increment
-ENGINE_FEATURES = [
-    "🧠 NN Relative Eval for Deltas, Accumulated Absolute Score (White's POV Tracking)",
-    "♟️ Iterative Deepening Alpha-Beta with PVS",
-    "💾 Fixed-Size Zobrist-Hashed Transposition Table",
-    "🔪 MVV-LVA Move Ordering & Killer Moves",
-    "🤫 Quiescence Search with Futility Pruning (Corrected Stand-Pat)",
-    "📉 Null Move Pruning & Late Move Reductions",
-    "🔍 Check Extensions",
-]
+ENGINE_FEATURES = []
 
 # ------- Configuration -------
 class Config:
@@ -110,9 +102,9 @@ class FixedTT:
 
 # ------- Cached FEN to Bitboard Conversion -------
 @functools.lru_cache(maxsize=Config.FEN_CACHE_SIZE)
-def make_x_cached(fen_cur: str, fen_par: str):
-    b1 = make_bitboard(beautifyFEN(fen_cur))
-    b2 = make_bitboard(beautifyFEN(fen_par))
+def make_x_cached(fen_1: str, fen_2: str): # Changed param names for clarity
+    b1 = make_bitboard(beautifyFEN(fen_1))
+    b2 = make_bitboard(beautifyFEN(fen_2))
     return (
         np.array(b1, dtype=np.float32).reshape(1, 769),
         np.array(b2, dtype=np.float32).reshape(1, 769)
@@ -124,44 +116,32 @@ class NNEvaluator:
         # Interpreter is now global, no need to initialize here
         pass
 
-    def evaluate_single_delta_white_pov(self, fen_current: str, fen_parent: str) -> float:
-        # Corrected call to match NN training input order: (parent, current)
-        # x_parent_np is bitboard for fen_parent, x_current_np is bitboard for fen_current
-        x_parent_np, x_current_np = make_x_cached(fen_parent, fen_current)
+    # Returns an absolute score for fen_to_evaluate from White's POV,
+    # using fen_context_for_pov to determine the player perspective for the raw NN output.
+    def evaluate_absolute_score_white_pov(self, fen_to_evaluate: str, fen_context_for_pov: str) -> float:
+        # NN expects (context_board, board_to_evaluate)
+        x_context_np, x_evaluate_np = make_x_cached(fen_context_for_pov, fen_to_evaluate)
         
-        # Use global interpreter and details
-        # input_details[0] for the parent input tensor
-        # input_details[1] for the current input tensor
-        # output_details[0] for the output tensor
-        interpreter.set_tensor(input_details[0]['index'], x_parent_np) # NN input 0 gets parent
-        interpreter.set_tensor(input_details[1]['index'], x_current_np) # NN input 1 gets current
+        interpreter.set_tensor(input_details[0]['index'], x_context_np) 
+        interpreter.set_tensor(input_details[1]['index'], x_evaluate_np)
         interpreter.invoke()
-        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0] # P(mover from parent to current wins)
+        # raw_evaluation is P(player_to_move_in_context_fen wins | board is now fen_to_evaluate)
+        raw_evaluation = interpreter.get_tensor(output_details[0]['index'])[0][0] 
         
-        unscaled_delta = (float(raw_evaluation) - 0.5) # Positive if move was good for the mover
+        # Score from the perspective of the player whose turn it was in fen_context_for_pov
+        unscaled_score_from_context_player_pov = (float(raw_evaluation) - 0.5)
 
-        # Determine whose move it was from fen_parent to fen_current
-        # fen_parent is like "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
-        # The second field is the active color.
-        active_color_in_parent = fen_parent.split()[1]
-
-        scaled_delta_for_white: float
-        if active_color_in_parent == 'w':
-            # White made the move from parent to current.
-            # unscaled_delta is from White's POV.
-            scaled_delta_for_white = unscaled_delta * Config.NN_SCALING_FACTOR
-        else: # active_color_in_parent == 'b'
-            # Black made the move from parent to current.
-            # unscaled_delta is from Black's POV. Negate for White's POV.
-            scaled_delta_for_white = -unscaled_delta * Config.NN_SCALING_FACTOR
+        active_color_in_context = fen_context_for_pov.split()[1]
         
-        # ---- START DEBUG (Uncomment selectively for debugging) ----
-        # if "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq" in fen_parent and Config.NN_SCALING_FACTOR > 1.0:
-        # if True:
-        #    unscaled_delta = float(raw_evaluation) - 0.5
-        #    print(f"DEBUG DELTA: fen_curr={fen_current.split()[0]} fen_par={fen_parent.split()[0]} raw={raw_evaluation:.4f} unscaled_delta={unscaled_delta:.4f} scaled_delta={scaled_delta_for_white:.2f}")
+        final_score_wpov = unscaled_score_from_context_player_pov * Config.NN_SCALING_FACTOR
+        if active_color_in_context == 'b': # If Black was to move in context_fen, raw_eval was Black's P(win)
+            final_score_wpov *= -1 # Negate to get White's POV
+            
+        # ---- START DEBUG (Example, adjust if needed) ----
+        # if True: # Config.NN_SCALING_FACTOR > 1.0:
+        #     print(f"DEBUG ABS_EVAL: eval_fen={fen_to_evaluate.split()[0]} ctx_fen={fen_context_for_pov.split()[0]} raw={raw_evaluation:.4f} unscaled_ctx_pov={unscaled_score_from_context_player_pov:.4f} final_wpov={final_score_wpov:.2f} ctx_color={active_color_in_context}")
         # ---- END DEBUG ----
-        return scaled_delta_for_white
+        return final_score_wpov
 
 # ------- Engine Implementation -------
 class Engine:
@@ -233,15 +213,12 @@ class Engine:
         self.nodes_searched = 0; self.q_nodes_searched = 0; self.tt_hits = 0
         self.beta_cutoffs = 0; self.nmp_cutoffs = 0; self.lmr_activations = 0
         
-        # Basic TT clearing strategy
-        if len(self.tt.entries) > (1 << (Config.TT_SIZE_POWER - 2)): # Clear if more than quarter full
+        if len(self.tt.entries) > (1 << (Config.TT_SIZE_POWER - 2)):
              self.tt = FixedTT()
              self.killer_moves = [[None, None] for _ in range(Config.MAX_PLY_FOR_KILLERS)]
 
         best_move_overall_uci = None; best_score_overall_white_pov = -float('inf')
-        initial_zobrist_key_root = self.zobrist_hasher.hash(self.board)
         initial_fen_at_root = self.board.fen()
-
 
         for depth in range(1, Config.MAX_SEARCH_DEPTH_ID + 1):
             if self.time_is_up() and depth > 1 :
@@ -250,21 +227,19 @@ class Engine:
             
             search_start_time_this_depth = time.time()
             try:
-                score_from_root_player_pov = self.alpha_beta(depth, -float('inf'), float('inf'), 
-                                                                initial_fen_at_root, 0.0, 
-                                                                True, 0)
+                # Call alpha_beta with initial_fen_at_root as the context for NN evals, and is_pv_node=True for root
+                score_from_root_player_pov = self.alpha_beta(depth, -float('inf'), float('inf'),
+                                                                initial_fen_at_root, True, 0) # is_pv_node=True, ply_count = 0
             except TimeoutError:
                 print(f"Search for Depth {depth} timed out.")
-                # Try to use previous depth's best move if available
-                tt_entry_root = self.tt.lookup(initial_zobrist_key_root)
+                tt_entry_root = self.tt.lookup(self.zobrist_hasher.hash(self.board))
                 if tt_entry_root and tt_entry_root[2]:
                     best_move_overall_uci = tt_entry_root[2]
-                    # Score might be from previous iteration, not current one
-                break # Stop iterative deepening
+                break 
 
             search_duration_this_depth = time.time() - search_start_time_this_depth
             
-            tt_entry_root = self.tt.lookup(initial_zobrist_key_root)
+            tt_entry_root = self.tt.lookup(self.zobrist_hasher.hash(self.board))
             current_best_move_uci_from_tt = None
             if tt_entry_root and tt_entry_root[2]:
                 current_best_move_uci_from_tt = tt_entry_root[2]
@@ -289,13 +264,12 @@ class Engine:
         return best_move_overall_uci, best_score_overall_white_pov
 
     def alpha_beta(self, depth_remaining: int, alpha: float, beta: float, 
-                     parent_fen_for_delta: str, parent_abs_white_pov: float,
-                     is_pv_node: bool, ply_count: int) -> float: # Returns score from current player's POV
+                     root_fen_for_nn_context: str, is_pv_node: bool, ply_count: int) -> float: # Returns score from current player's POV
         
-        if self.time_is_up() and ply_count > 0 : raise TimeoutError("Search time limit exceeded") # Check deeper in search
+        if self.time_is_up() and ply_count > 0 : raise TimeoutError("Search time limit exceeded")
 
         self.nodes_searched += 1
-        alpha_original = alpha # Used for TT flag
+        alpha_original = alpha
         current_node_zobrist_key = self.zobrist_hasher.hash(self.board)
 
         if ply_count > 0 and (self.board.can_claim_threefold_repetition() or self.board.is_fifty_moves()):
@@ -316,20 +290,8 @@ class Engine:
         if self.board.is_checkmate(): return -100000.0 + ply_count 
         if self.board.is_stalemate() or self.board.is_insufficient_material(): return 0.0
 
-        # FEN of the current node, to be used as parent_fen_for_delta for its children
-        fen_of_current_node = self.board.fen()
-
-        current_node_abs_score_white_pov = parent_abs_white_pov + \
-            self.nn_evaluator.evaluate_single_delta_white_pov(fen_of_current_node, parent_fen_for_delta)
-        
-        # ---- START DEBUG ----
-        # if ply_count < 3 and Config.NN_SCALING_FACTOR > 1.0 :
-        #    delta_for_print = self.nn_evaluator.evaluate_single_delta_white_pov(self.board.fen(), parent_fen_for_delta)
-        #    print(f"DEBUG SCORE ACC: ply={ply_count} parent_abs_WPOV={parent_abs_white_pov:.2f} delta_WPOV={delta_for_print:.2f} current_abs_WPOV={current_node_abs_score_white_pov:.2f} fen={self.board.fen().split()[0]} ToMove={'W' if self.board.turn else 'B'} alpha={alpha:.2f} beta={beta:.2f} PV={is_pv_node}")
-        # ---- END DEBUG ----
-
         if depth_remaining <= 0:
-            return self.quiescence(alpha, beta, self.board.fen(), current_node_abs_score_white_pov, ply_count)
+            return self.quiescence(alpha, beta, root_fen_for_nn_context, ply_count)
 
         can_do_nmp = depth_remaining >= (Config.NMP_REDUCTION + 1) and not self.board.is_check() and ply_count > 0
         if can_do_nmp:
@@ -338,10 +300,8 @@ class Engine:
         
         if can_do_nmp:
             self.board.push(chess.Move.null())
-            # Parent for NMP child is current node (null-moved), its score is current_node_abs_score_white_pov
-            score = -self.alpha_beta(depth_remaining - 1 - Config.NMP_REDUCTION, -beta, -alpha,
-                                     fen_of_current_node, current_node_abs_score_white_pov,
-                                     False, ply_count + 1)
+            score = -self.alpha_beta(depth_remaining - 1 - Config.NMP_REDUCTION, -beta, -alpha, 
+                                     root_fen_for_nn_context, False, ply_count + 1) # NMP is not a PV node
             self.board.pop()
             if score >= beta: 
                 self.nmp_cutoffs +=1
@@ -365,13 +325,13 @@ class Engine:
             
             current_move_score_from_child_pov = 0 
 
-            if i == 0 or not is_pv_node: 
+            if i == 0 : # First move, always full window search, PV status depends on parent
                 current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, -beta, -alpha,
-                                                                fen_of_current_node, current_node_abs_score_white_pov,
+                                                                root_fen_for_nn_context, 
                                                                 is_pv_node, # Child is PV only if parent is PV and it's the first move
                                                                 ply_count + 1)
-            else: 
-                # LMR for non-PV moves or non-first moves in PV node
+            else: # Subsequent moves, PVS / LMR logic
+                # LMR for non-PV moves or non-first moves in PV node (already handled by i > 0)
                 if child_search_depth >= Config.LMR_REDUCTION and \
                    i >= Config.LMR_MIN_MOVES_TRIED and \
                    not extension and not self.board.is_capture(move) and not move.promotion:
@@ -379,19 +339,22 @@ class Engine:
                     self.lmr_activations += 1
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth - Config.LMR_REDUCTION, 
                                                                     -alpha -1, -alpha, 
-                                                                    fen_of_current_node, current_node_abs_score_white_pov,
-                                                                    False, ply_count + 1)
-                else: # If LMR not applicable (e.g. capture, promo, check, or too shallow/few moves tried)
-                      # Still do a null-window search if it's not the first move of a PV line
+                                                                    root_fen_for_nn_context, False, ply_count + 1) # LMR is not PV
+                else: # If LMR not applicable, do a null-window search first
                      current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, 
                                                                     -alpha -1, -alpha, 
-                                                                    fen_of_current_node, current_node_abs_score_white_pov,
-                                                                    False, ply_count + 1)
+                                                                    root_fen_for_nn_context, False, ply_count + 1) # Null-window search is not PV
 
+                # If null-window search failed high, re-search with full window (PVS)
                 if current_move_score_from_child_pov > alpha and current_move_score_from_child_pov < beta : 
+                    # This re-search aims to establish a new PV, so is_pv_node should be True.
+                    # However, if the original node (self) was not PV, a child cannot become PV in this PVS re-search logic.
+                    # The standard PVS re-search is only done if the parent itself is a PV node.
+                    # For simplicity and to avoid changing PV status too aggressively deep in non-PV lines,
+                    # we can pass `False` here, or `is_pv_node` (meaning only re-search as PV if parent was PV).
+                    # Let's stick to only becoming a PV node if the parent was also a PV node.
                     current_move_score_from_child_pov = -self.alpha_beta(child_search_depth, -beta, -alpha,
-                                                                    fen_of_current_node, current_node_abs_score_white_pov,
-                                                                    True, ply_count + 1) 
+                                                                    root_fen_for_nn_context, is_pv_node, ply_count + 1) 
             self.board.pop()
 
             if current_move_score_from_child_pov > value_from_current_player_pov:
@@ -415,16 +378,14 @@ class Engine:
         return value_from_current_player_pov
 
     def quiescence(self, alpha: float, beta: float, 
-                    parent_fen_for_delta: str, parent_abs_white_pov: float, 
-                    ply_count: int) -> float: # Returns score from current player's POV
+                    root_fen_for_nn_context: str, ply_count: int) -> float: # Returns score from current player's POV
         self.q_nodes_searched += 1
         
         if self.time_is_up() and ply_count > 0: raise TimeoutError("Search time limit exceeded")
 
         if self.board.can_claim_threefold_repetition() or self.board.is_fifty_moves(): return 0.0
         
-        stand_pat_score_white_pov = parent_abs_white_pov + \
-            self.nn_evaluator.evaluate_single_delta_white_pov(self.board.fen(), parent_fen_for_delta)
+        stand_pat_score_white_pov = self.nn_evaluator.evaluate_absolute_score_white_pov(self.board.fen(), root_fen_for_nn_context)
         
         stand_pat_current_player_pov = stand_pat_score_white_pov if self.board.turn == chess.WHITE else -stand_pat_score_white_pov
 
@@ -456,14 +417,12 @@ class Engine:
             return stand_pat_current_player_pov
 
         best_val_current_player_pov = stand_pat_current_player_pov
-        fen_at_this_q_level = self.board.fen() # FEN before iterating q_moves
+        fen_at_this_q_level = self.board.fen() # Not strictly needed anymore for NN context
 
         for move in ordered_q_moves:
             self.board.push(move)
-            # Child's parent_fen is current_q_node's fen (fen_at_this_q_level),
-            # child's parent_abs_white_pov is current_q_node's stand_pat_score_white_pov (score of fen_at_this_q_level)
-            score = -self.quiescence(-beta, -alpha,
-                                     fen_at_this_q_level, stand_pat_score_white_pov,
+            score = -self.quiescence(-beta, -alpha, 
+                                     root_fen_for_nn_context, 
                                      ply_count + 1)
             self.board.pop()
             

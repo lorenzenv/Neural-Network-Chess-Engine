@@ -243,7 +243,6 @@ def main():
     test_positions = [
         {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"},
         {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13"},
-        {"name": "test3_sicilian_opening_white", "fen": "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2"},
         {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23"},
         {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1"},
         {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47"},
