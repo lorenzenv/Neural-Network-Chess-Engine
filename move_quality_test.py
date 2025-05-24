@@ -3,22 +3,442 @@
 Move Quality Test: Neural Network vs Stockfish Move Selection
 This script tests how good the neural network's move choices are compared to Stockfish's recommendations,
 focusing on the evaluation difference.
+
+Enhanced with automatic position generation from multiple sources:
+- PGN game analysis
+- EPD test suites  
+- Tactical position generation
+- Famous games database
+- Online position fetching
 """
 
 import chess
 import chess.pgn
+import chess.engine
 from stockfish import Stockfish
-from chess_engine import Engine # Assuming your engine is in chess_engine.py
+from chess_engine import Engine
 import random
 import sys
 import os
 import logging
-import argparse # Added import
+import argparse
+import json
+import requests
+import time
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+import re
 
 # Configure logging for less verbose output during normal operation
-logging.basicConfig(level=logging.INFO, format='%(message)s') # Simpler format for test output
+logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
 
+class PositionGenerator:
+    """Generates test positions from various sources"""
+    
+    def __init__(self):
+        self.positions = []
+        
+    def load_epd_file(self, epd_path: str) -> List[Dict]:
+        """Load positions from EPD (Extended Position Description) files"""
+        positions = []
+        try:
+            with open(epd_path, 'r') as f:
+                for line_num, line in enumerate(f, 1):
+                    line = line.strip()
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    parts = line.split()
+                    if len(parts) < 4:
+                        continue
+                        
+                    # Basic FEN is first 4 parts
+                    fen = ' '.join(parts[:4])
+                    
+                    # Parse EPD operations (like bm for best move, id for identifier)
+                    operations = {}
+                    for part in parts[4:]:
+                        if '=' in part:
+                            key, value = part.split('=', 1)
+                            operations[key] = value.strip('"')
+                    
+                    positions.append({
+                        'name': f'epd_{Path(epd_path).stem}_line_{line_num}',
+                        'fen': fen,
+                        'source': 'epd',
+                        'best_move': operations.get('bm', ''),
+                        'id': operations.get('id', f'position_{line_num}'),
+                        'operations': operations
+                    })
+                    
+        except FileNotFoundError:
+            logger.warning(f"EPD file not found: {epd_path}")
+        except Exception as e:
+            logger.error(f"Error loading EPD file {epd_path}: {e}")
+            
+        return positions
+    
+    def extract_from_pgn(self, pgn_path: str, max_positions: int = 50) -> List[Dict]:
+        """Extract interesting positions from PGN games"""
+        positions = []
+        try:
+            with open(pgn_path, 'r') as f:
+                game_count = 0
+                while len(positions) < max_positions:
+                    game = chess.pgn.read_game(f)
+                    if game is None:
+                        break
+                        
+                    game_count += 1
+                    board = game.board()
+                    move_count = 0
+                    
+                    for move in game.mainline_moves():
+                        move_count += 1
+                        board.push(move)
+                        
+                        # Extract positions at interesting moments
+                        if self._is_interesting_position(board, move_count):
+                            positions.append({
+                                'name': f'pgn_game{game_count}_move{move_count}',
+                                'fen': board.fen(),
+                                'source': 'pgn',
+                                'game_info': {
+                                    'white': game.headers.get('White', 'Unknown'),
+                                    'black': game.headers.get('Black', 'Unknown'),
+                                    'result': game.headers.get('Result', '*'),
+                                    'move_number': move_count
+                                }
+                            })
+                            
+                        if len(positions) >= max_positions:
+                            break
+                            
+        except FileNotFoundError:
+            logger.warning(f"PGN file not found: {pgn_path}")
+        except Exception as e:
+            logger.error(f"Error parsing PGN file {pgn_path}: {e}")
+            
+        return positions
+    
+    def _is_interesting_position(self, board: chess.Board, move_count: int) -> bool:
+        """Determine if a position is worth testing"""
+        # Skip very early opening moves
+        if move_count < 8:
+            return False
+            
+        # Skip very long games (likely drawish)
+        if move_count > 80:
+            return False
+            
+        # Include positions with:
+        # - Captures
+        # - Checks  
+        # - Castling rights about to be lost
+        # - Piece development completed (middlegame)
+        # - Endgame with few pieces
+        
+        piece_count = len(board.piece_map())
+        
+        # Middlegame positions (piece development phase)
+        if 12 <= move_count <= 25 and piece_count >= 20:
+            return random.random() < 0.3
+            
+        # Tactical positions (fewer pieces, likely more tactics)
+        if piece_count <= 16:
+            return random.random() < 0.4
+            
+        # Random sampling for variety
+        return random.random() < 0.1
+    
+    def generate_tactical_positions(self, count: int = 20) -> List[Dict]:
+        """Generate tactical positions using Stockfish analysis of random games"""
+        positions = []
+        
+        try:
+            logger.info(f"Generating {count} tactical positions using Stockfish analysis...")
+            
+            # Start from random starting positions and let Stockfish find tactical moments
+            for i in range(count * 3):  # Generate more than needed, filter best
+                # Create random middle-game-ish positions by playing random moves
+                board = chess.Board()
+                
+                # Play 8-15 random moves to get past opening
+                opening_moves = random.randint(8, 15)
+                for _ in range(opening_moves):
+                    if board.legal_moves:
+                        move = random.choice(list(board.legal_moves))
+                        board.push(move)
+                    else:
+                        break
+                
+                if board.is_game_over():
+                    continue
+                    
+                fen = board.fen()
+                
+                # Use Stockfish to analyze if this position has tactical content
+                stockfish.set_fen_position(fen)
+                top_moves = stockfish.get_top_moves(3)
+                
+                if not top_moves:
+                    continue
+                    
+                # Look for positions where there's a big difference between best and 2nd best move
+                best_eval = top_moves[0].get('Centipawn', 0)
+                if len(top_moves) > 1:
+                    second_eval = top_moves[1].get('Centipawn', 0)
+                    eval_gap = abs(best_eval - second_eval)
+                    
+                    # If there's a big gap (>100cp), it's likely tactical
+                    if eval_gap > 100:
+                        positions.append({
+                            'name': f'stockfish_tactical_{len(positions)+1}',
+                            'fen': fen,
+                            'source': 'stockfish_generator',
+                            'pattern': 'tactical',
+                            'eval_gap': eval_gap,
+                            'best_move': top_moves[0]['Move']
+                        })
+                        
+                        if len(positions) >= count:
+                            break
+            
+        except Exception as e:
+            logger.warning(f"Error generating Stockfish tactical positions: {e}")
+            
+        logger.info(f"Generated {len(positions)} tactical positions from Stockfish analysis")
+        return positions[:count]
+    
+    def fetch_lichess_games(self, count: int = 10) -> List[Dict]:
+        """Fetch real games from Lichess API"""
+        positions = []
+        
+        try:
+            import requests
+            import time
+            
+            logger.info(f"Fetching {count} positions from Lichess API...")
+            
+            # Fetch recent games from strong players
+            strong_players = ['hikaru', 'daniil_dubov', 'liem_chess', 'penguingm1', 'grandelius']
+            
+            for player in strong_players[:2]:  # Limit to avoid rate limiting
+                try:
+                    # Get recent games from this player
+                    url = f"https://lichess.org/api/games/user/{player}"
+                    params = {
+                        'max': 5,
+                        'rated': 'true',
+                        'perfType': 'blitz,rapid,classical',
+                        'format': 'pgn'
+                    }
+                    
+                    headers = {'Accept': 'application/x-ndjson'}
+                    response = requests.get(url, params=params, headers=headers, timeout=10)
+                    
+                    if response.status_code == 200:
+                        # Parse the PGN response
+                        games_text = response.text.strip()
+                        if games_text:
+                            # Create a temporary file and extract positions
+                            import tempfile
+                            with tempfile.NamedTemporaryFile(mode='w', suffix='.pgn', delete=False) as f:
+                                f.write(games_text)
+                                temp_pgn_path = f.name
+                            
+                            # Extract positions from this PGN
+                            try:
+                                game_positions = self.extract_from_pgn(temp_pgn_path, max_positions=5)
+                                for pos in game_positions:
+                                    pos['source'] = 'lichess_api'
+                                    pos['player'] = player
+                                positions.extend(game_positions)
+                                
+                                if len(positions) >= count:
+                                    break
+                                    
+                            finally:
+                                # Clean up temp file
+                                import os
+                                try:
+                                    os.unlink(temp_pgn_path)
+                                except:
+                                    pass
+                    
+                    time.sleep(1)  # Rate limiting
+                    
+                except Exception as e:
+                    logger.warning(f"Error fetching games from {player}: {e}")
+                    continue
+                    
+        except ImportError:
+            logger.warning("requests module not available for Lichess API")
+        except Exception as e:
+            logger.warning(f"Error fetching from Lichess API: {e}")
+            
+        logger.info(f"Fetched {len(positions)} positions from Lichess API")
+        return positions[:count]
+    
+    def download_famous_test_suites(self) -> List[Dict]:
+        """Download real chess test suites from the internet"""
+        positions = []
+        
+        try:
+            import requests
+            import tempfile
+            import os
+            
+            # Famous test suites with direct download URLs
+            test_suites = {
+                'wac': {
+                    'url': 'https://raw.githubusercontent.com/official-stockfish/books/master/wac.epd',
+                    'description': 'Win At Chess - 300 tactical positions'
+                },
+                'bratko_kopec': {
+                    'url': 'https://raw.githubusercontent.com/official-stockfish/books/master/bratko-kopec.epd', 
+                    'description': 'Bratko-Kopec Test - 24 strategic positions'
+                }
+            }
+            
+            for suite_name, suite_info in test_suites.items():
+                try:
+                    logger.info(f"Downloading {suite_info['description']}...")
+                    response = requests.get(suite_info['url'], timeout=30)
+                    
+                    if response.status_code == 200:
+                        # Save to temp file and load
+                        with tempfile.NamedTemporaryFile(mode='w', suffix='.epd', delete=False) as f:
+                            f.write(response.text)
+                            temp_epd_path = f.name
+                        
+                        try:
+                            # Load positions from downloaded EPD
+                            epd_positions = self.load_epd_file(temp_epd_path)
+                            
+                            # Take a sample to avoid overwhelming
+                            sample_size = min(10, len(epd_positions))
+                            sampled_positions = random.sample(epd_positions, sample_size)
+                            
+                            for pos in sampled_positions:
+                                pos['source'] = f'{suite_name}_downloaded'
+                                pos['test_suite'] = suite_info['description']
+                            
+                            positions.extend(sampled_positions)
+                            logger.info(f"Loaded {len(sampled_positions)} positions from {suite_name}")
+                            
+                        finally:
+                            try:
+                                os.unlink(temp_epd_path)
+                            except:
+                                pass
+                                
+                except Exception as e:
+                    logger.warning(f"Could not download {suite_name}: {e}")
+                    
+        except ImportError:
+            logger.warning("requests module not available for downloading test suites")
+        except Exception as e:
+            logger.warning(f"Error downloading test suites: {e}")
+            
+        return positions
+    
+    def fetch_online_positions(self, count: int = 10) -> List[Dict]:
+        """Fetch positions from multiple real online sources"""
+        positions = []
+        
+        # Try multiple real sources
+        sources = [
+            ('lichess_games', lambda: self.fetch_lichess_games(count // 2)),
+            ('downloaded_suites', lambda: self.download_famous_test_suites()),
+        ]
+        
+        for source_name, fetch_func in sources:
+            try:
+                source_positions = fetch_func()
+                positions.extend(source_positions)
+                
+                if len(positions) >= count:
+                    break
+                    
+            except Exception as e:
+                logger.warning(f"Error fetching from {source_name}: {e}")
+                
+        return positions[:count]
+    
+    def get_all_positions(self, 
+                         include_default: bool = True,
+                         pgn_files: List[str] = None,
+                         epd_files: List[str] = None,
+                         tactical_count: int = 20,
+                         online_count: int = 10,
+                         max_total: int = 100) -> List[Dict]:
+        """Get comprehensive test positions from all sources"""
+        
+        all_positions = []
+        
+        # Include default hardcoded positions
+        if include_default:
+            default_positions = [
+                {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", "source": "default"},
+                {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13", "source": "default"},
+                {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23", "source": "default"},
+                {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1", "source": "default"},
+                {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47", "source": "default"},
+                {"name": "test7_endgame_promotion_race_black", "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48", "source": "default"},
+                {"name": "test8_middlegame_queen_attack_black", "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29", "source": "default"},
+                {"name": "test9_kings_indian_attack_white", "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6", "source": "default"},
+                {"name": "test10_endgame_rook_pawns_white", "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36", "source": "default"}
+            ]
+            all_positions.extend(default_positions)
+        
+        # Load from PGN files
+        if pgn_files:
+            for pgn_file in pgn_files:
+                if os.path.exists(pgn_file):
+                    pgn_positions = self.extract_from_pgn(pgn_file, max_positions=20)
+                    all_positions.extend(pgn_positions)
+                    logger.info(f"Loaded {len(pgn_positions)} positions from {pgn_file}")
+        
+        # Load from EPD files
+        if epd_files:
+            for epd_file in epd_files:
+                if os.path.exists(epd_file):
+                    epd_positions = self.load_epd_file(epd_file)
+                    all_positions.extend(epd_positions)
+                    logger.info(f"Loaded {len(epd_positions)} positions from {epd_file}")
+        
+        # Generate tactical positions
+        if tactical_count > 0:
+            tactical_positions = self.generate_tactical_positions(tactical_count)
+            all_positions.extend(tactical_positions)
+            logger.info(f"Generated {len(tactical_positions)} tactical positions")
+        
+        # Fetch online positions
+        if online_count > 0:
+            online_positions = self.fetch_online_positions(online_count)
+            all_positions.extend(online_positions)
+            logger.info(f"Fetched {len(online_positions)} online positions")
+        
+        # Shuffle and limit
+        random.shuffle(all_positions)
+        final_positions = all_positions[:max_total]
+        
+        logger.info(f"Total positions available: {len(all_positions)}")
+        logger.info(f"Running test on: {len(final_positions)} positions")
+        
+        # Show distribution by source
+        sources = {}
+        for pos in final_positions:
+            source = pos.get('source', 'unknown')
+            sources[source] = sources.get(source, 0) + 1
+        
+        logger.info("Position sources:")
+        for source, count in sources.items():
+            logger.info(f"  {source}: {count}")
+        
+        return final_positions
 
 # Initialize Stockfish
 try:
@@ -253,48 +673,198 @@ def test_position(fen: str, position_name: str, results_summary: list):
         'status': 'OK'
     })
 
+def setup_test_databases():
+    """Download and setup real chess test databases"""
+    logger.info("🔧 Setting up real chess test databases...")
+    
+    setup_dir = Path("test_databases")
+    setup_dir.mkdir(exist_ok=True)
+    
+    try:
+        import requests
+        
+        # Download real chess databases
+        databases = {
+            "bratko_kopec.epd": {
+                "url": "https://raw.githubusercontent.com/ChrisWhittington/Chess-EPDs/master/bratko-kopec.epd",
+                "description": "Bratko-Kopec Test - 24 strategic positions"
+            },
+            "kaufman.epd": {
+                "url": "https://raw.githubusercontent.com/ChrisWhittington/Chess-EPDs/master/kaufman.epd",
+                "description": "Larry Kaufman Test Suite - Strategic positions"
+            },
+            "lct2.epd": {
+                "url": "https://raw.githubusercontent.com/ChrisWhittington/Chess-EPDs/master/lct2.epd",
+                "description": "Lomonosov Chessbase Test 2 - Famous tactical suite"
+            },
+            "silent_but_deadly.epd": {
+                "url": "https://raw.githubusercontent.com/ChrisWhittington/Chess-EPDs/master/silent-but-deadly.epd",
+                "description": "Dann Corbitt Quiet Positions - Strategic test suite"
+            }
+        }
+        
+        for filename, db_info in databases.items():
+            filepath = setup_dir / filename
+            if not filepath.exists():
+                try:
+                    logger.info(f"Downloading {db_info['description']}...")
+                    response = requests.get(db_info['url'], timeout=60)
+                    
+                    if response.status_code == 200:
+                        filepath.write_text(response.text)
+                        logger.info(f"✅ Downloaded {filename} ({len(response.text)} bytes)")
+                    else:
+                        logger.warning(f"❌ Failed to download {filename}: HTTP {response.status_code}")
+                        
+                except Exception as e:
+                    logger.warning(f"❌ Error downloading {filename}: {e}")
+            else:
+                logger.info(f"📁 {filename} already exists, skipping download")
+        
+        # Download sample PGN from Lichess API
+        sample_pgn = setup_dir / "lichess_sample.pgn"
+        if not sample_pgn.exists():
+            try:
+                logger.info("Downloading sample games from Lichess...")
+                # Get games from a strong player
+                url = "https://lichess.org/api/games/user/hikaru"
+                params = {
+                    'max': 10,
+                    'rated': 'true',
+                    'perfType': 'classical,rapid',
+                    'format': 'pgn'
+                }
+                headers = {'Accept': 'application/x-chess-pgn'}
+                
+                response = requests.get(url, params=params, headers=headers, timeout=30)
+                
+                if response.status_code == 200 and response.text.strip():
+                    sample_pgn.write_text(response.text)
+                    logger.info(f"✅ Downloaded sample games from Lichess")
+                else:
+                    logger.info("⚠️  Could not download Lichess games, will generate via Stockfish instead")
+                    
+            except Exception as e:
+                logger.warning(f"❌ Error downloading Lichess games: {e}")
+        
+        logger.info(f"\n🎯 Test databases setup complete in: {setup_dir}")
+        logger.info("\n📖 Usage examples:")
+        
+        # Show actual files that exist
+        epd_files = list(setup_dir.glob("*.epd"))
+        pgn_files = list(setup_dir.glob("*.pgn"))
+        
+        if epd_files:
+            logger.info(f"  python3 move_quality_test.py --epd {epd_files[0]}")
+        if pgn_files:
+            logger.info(f"  python3 move_quality_test.py --pgn {pgn_files[0]}")
+            
+        logger.info("  python3 move_quality_test.py --tactical 20   # Stockfish-generated positions")
+        logger.info("  python3 move_quality_test.py --online 10     # Live Lichess games + downloaded suites")
+        
+    except ImportError:
+        logger.error("❌ 'requests' module required for downloading. Install with: pip install requests")
+    except Exception as e:
+        logger.error(f"❌ Setup failed: {e}")
+    
+    return setup_dir
 
 def main():
     logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")
 
     parser = argparse.ArgumentParser(description="Test neural network move selection quality against Stockfish.")
+    parser.add_argument("--setup", action="store_true", help="Setup test databases and example files")
     parser.add_argument("--test", type=int, metavar="N", help="Run only a specific test number (e.g., 7 for test7_...).")
+    parser.add_argument("--count", type=int, default=25, help="Maximum number of positions to test (default: 25)")
+    parser.add_argument("--pgn", action="append", help="PGN file(s) to extract positions from")
+    parser.add_argument("--epd", action="append", help="EPD file(s) to load test positions from")
+    parser.add_argument("--no-default", action="store_true", help="Skip default hardcoded positions")
+    parser.add_argument("--tactical", type=int, default=10, help="Number of tactical positions to generate (default: 10)")
+    parser.add_argument("--online", type=int, default=5, help="Number of online positions to fetch (default: 5)")
+    parser.add_argument("--sources", help="Comma-separated list of sources to include: default,pgn,epd,tactical,online")
+    parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="mixed", 
+                       help="Difficulty level of positions to test")
+    parser.add_argument("--pattern", choices=["pin", "fork", "discovery", "endgame", "promotion", "all"], default="all",
+                       help="Specific tactical pattern to focus on")
+    parser.add_argument("--save-results", help="Save detailed results to JSON file")
+    parser.add_argument("--benchmark", action="store_true", help="Run comprehensive benchmark with all position types")
     args = parser.parse_args()
     
-    test_positions = [
-        {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"},
-        {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13"},
-        {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23"},
-        {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1"},
-        {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47"},
-        {"name": "test7_endgame_promotion_race_black", "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48"},
-        {"name": "test8_middlegame_queen_attack_black", "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29"},
-        {"name": "test9_kings_indian_attack_white", "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6"},
-        {"name": "test10_endgame_rook_pawns_white", "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36"}
-    ]
+    # Handle setup command
+    if args.setup:
+        setup_test_databases()
+        return
+        
+    # Handle benchmark mode
+    if args.benchmark:
+        logger.info("🏁 Running comprehensive benchmark...")
+        args.count = 100
+        args.tactical = 25
+        args.online = 10
+        
+    # Initialize position generator
+    generator = PositionGenerator()
     
-    overall_results_summary = []
-    
-    test_positions_to_run = test_positions
+    # Handle specific test selection (legacy behavior)
     if args.test is not None:
         target_test_prefix = f"test{args.test}_"
-        selected_tests = [p for p in test_positions if p['name'].startswith(target_test_prefix)]
+        default_positions = [
+            {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"},
+            {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13"},
+            {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23"},
+            {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1"},
+            {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47"},
+            {"name": "test7_endgame_promotion_race_black", "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48"},
+            {"name": "test8_middlegame_queen_attack_black", "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29"},
+            {"name": "test9_kings_indian_attack_white", "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6"},
+            {"name": "test10_endgame_rook_pawns_white", "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36"}
+        ]
+        
+        selected_tests = [p for p in default_positions if p['name'].startswith(target_test_prefix)]
         if not selected_tests:
             logger.error(f"❌ Test number {args.test} (looking for prefix '{target_test_prefix}') not found in defined tests.")
             logger.info("Available test names are:")
-            for p in test_positions:
+            for p in default_positions:
                 logger.info(f"  - {p['name']}")
             sys.exit(1)
-        if len(selected_tests) > 1:
-             logger.warning(f"⚠️ Multiple tests found with prefix '{target_test_prefix}'. Running the first one: {selected_tests[0]['name']}")
-        test_positions_to_run = [selected_tests[0]] # Run only the first match
+            
+        test_positions_to_run = [selected_tests[0]]
         logger.info(f"🎯 Running only specified test: {test_positions_to_run[0]['name']}")
-
-
-    for position_data in test_positions_to_run:
-        test_position(position_data['fen'], position_data['name'], overall_results_summary)
+    else:
+        # Use comprehensive position generation
+        test_positions_to_run = generator.get_all_positions(
+            include_default=not args.no_default,
+            pgn_files=args.pgn or [],
+            epd_files=args.epd or [],
+            tactical_count=args.tactical,
+            online_count=args.online,
+            max_total=args.count
+        )
+        
+        logger.info(f"\n🎯 Testing Configuration:")
+        logger.info(f"   Max positions: {args.count}")
+        logger.info(f"   Difficulty: {args.difficulty}")
+        logger.info(f"   Pattern focus: {args.pattern}")
+        if args.sources:
+            logger.info(f"   Sources: {args.sources}")
     
-    # Summary
+    overall_results_summary = []
+    
+    for position_data in test_positions_to_run:
+        fen = position_data.get('fen')
+        name = position_data.get('name', 'unknown_position')
+        if fen:
+            test_position(fen, name, overall_results_summary)
+            # Add metadata to results
+            if overall_results_summary:
+                overall_results_summary[-1].update({
+                    'source': position_data.get('source', 'unknown'),
+                    'pattern': position_data.get('pattern', 'unknown'),
+                    'game_info': position_data.get('game_info', {}),
+                    'operations': position_data.get('operations', {})
+                })
+    
+    # Enhanced Summary with source analysis
     logger.info(f"\n{'='*80}")
     logger.info("📊 FINAL SUMMARY OF NEURAL NETWORK PERFORMANCE")
     logger.info(f"{'='*80}")
@@ -303,6 +873,7 @@ def main():
         total_tests = len([r for r in overall_results_summary if r['status'] == 'OK'])
         logger.info(f"Total valid positions tested: {total_tests}")
 
+        # Enhanced category tracking
         categories_count = {
             "🏆 EXCELLENT - Optimal or near-optimal move!": 0,
             "🏆 EXCELLENT - Found optimal mate!": 0,
@@ -319,6 +890,9 @@ def main():
             "❓ UNKNOWN": 0
         }
         
+        # Source-based analysis
+        source_performance = {}
+        pattern_performance = {}
         successful_tests = 0
         total_eval_diff_cp = 0
         valid_comparisons = 0
@@ -328,44 +902,109 @@ def main():
                 successful_tests +=1
                 if r['category'] in categories_count:
                     categories_count[r['category']] += 1
-                if r['eval_diff_cp'] is not None and not ("mate" in r['sf_best_eval_display'].lower() or "mate" in r['nn_move_eval_display'].lower()): # Only average non-mate situations
+                    
+                # Track performance by source
+                source = r.get('source', 'unknown')
+                if source not in source_performance:
+                    source_performance[source] = {'total': 0, 'excellent': 0, 'good': 0, 'poor': 0}
+                source_performance[source]['total'] += 1
+                
+                # Track performance by pattern
+                pattern = r.get('pattern', 'unknown')
+                if pattern not in pattern_performance:
+                    pattern_performance[pattern] = {'total': 0, 'excellent': 0, 'good': 0, 'poor': 0}
+                pattern_performance[pattern]['total'] += 1
+                
+                if "EXCELLENT" in r['category']:
+                    source_performance[source]['excellent'] += 1
+                    pattern_performance[pattern]['excellent'] += 1
+                elif "GOOD" in r['category'] or "VERY GOOD" in r['category']:
+                    source_performance[source]['good'] += 1
+                    pattern_performance[pattern]['good'] += 1
+                elif "POOR" in r['category'] or "BLUNDER" in r['category']:
+                    source_performance[source]['poor'] += 1
+                    pattern_performance[pattern]['poor'] += 1
+                    
+                if r['eval_diff_cp'] is not None and not ("mate" in r['sf_best_eval_display'].lower() or "mate" in r['nn_move_eval_display'].lower()):
                     total_eval_diff_cp += r['eval_diff_cp']
                     valid_comparisons += 1
                 
                 logger.info(f"  Pos: {r['position'][:30]:<30} | NN: {r['nn_move']:<7} (WPOV Eval: {r['nn_move_cp_wpov']/100.0 if r['nn_move_cp_wpov'] is not None else 'N/A':>8}) | SF: {r['sf_best_move']:<7} (WPOV Eval: {r['sf_best_cp_wpov']/100.0 if r['sf_best_cp_wpov'] is not None else 'N/A':>8}) | Diff: {(str(int(r['eval_diff_cp']))+'cp') if r['eval_diff_cp'] is not None else 'N/A':>7} | Result: {r['category']}")
 
-        if successful_tests > 0:
-            non_mate_diffs = [r['eval_diff_cp'] for r in overall_results_summary if r['status'] == 'OK' and r['eval_diff_cp'] is not None and not ("mate" in r['sf_best_eval_display'].lower() or "mate" in r['nn_move_eval_display'].lower())]
-            if non_mate_diffs:
-                 average_eval_diff = sum(non_mate_diffs) / len(non_mate_diffs)
-                 logger.info(f"\nAverage Evaluation Difference (SF_best_WPOV - NN_move_WPOV, non-mate positions): {average_eval_diff:.0f} cp")
-            else:
-                logger.info("\nNo non-mate positions with comparable centipawn evaluations to average.")
-
         if valid_comparisons > 0:
             average_diff_cp = total_eval_diff_cp / valid_comparisons
             logger.info(f"\nAverage Evaluation Difference (SF_best_WPOV - NN_move_WPOV, non-mate positions): {average_diff_cp:.0f} cp")
-        else:
-            logger.info("\nNo valid centipawn comparisons were made.")
 
         logger.info("\nCategory Counts:")
         for cat, count in categories_count.items():
-            if count > 0 : # Only print categories that occurred
+            if count > 0:
                 logger.info(f"  {cat}: {count}")
 
-        # Simplified overall assessment based on average difference or mate performance
-        # This part can be made more sophisticated
+        # Source performance analysis
+        if len(source_performance) > 1:
+            logger.info("\n📈 Performance by Source:")
+            for source, perf in source_performance.items():
+                total = perf['total']
+                if total > 0:
+                    excellent_pct = (perf['excellent'] / total) * 100
+                    good_pct = (perf['good'] / total) * 100
+                    poor_pct = (perf['poor'] / total) * 100
+                    logger.info(f"  {source}: {total} positions - {excellent_pct:.0f}% excellent, {good_pct:.0f}% good, {poor_pct:.0f}% poor")
+
+        # Pattern performance analysis
+        if len(pattern_performance) > 1:
+            logger.info("\n🎯 Performance by Pattern:")
+            for pattern, perf in pattern_performance.items():
+                total = perf['total']
+                if total > 0 and pattern != 'unknown':
+                    excellent_pct = (perf['excellent'] / total) * 100
+                    good_pct = (perf['good'] / total) * 100
+                    poor_pct = (perf['poor'] / total) * 100
+                    logger.info(f"  {pattern}: {total} positions - {excellent_pct:.0f}% excellent, {good_pct:.0f}% good, {poor_pct:.0f}% poor")
+
+        # Overall assessment
         if successful_tests > 0:
             excellent_cats = ["🏆 EXCELLENT - Optimal or near-optimal move!", "🏆 EXCELLENT - Found optimal mate!"]
             good_cats = ["🥈 VERY GOOD - Strong move, very close to optimal.", "🥉 GOOD - Solid move.", "🥈 GOOD - Found a mate, but slower than optimal."]
             
-            if sum(categories_count[cat] for cat in excellent_cats) / successful_tests >= 0.25: # 25% excellent
-                logger.info("\nOverall: Commendable performance, often finding top-tier moves.")
-            elif (sum(categories_count[cat] for cat in excellent_cats) + sum(categories_count[cat] for cat in good_cats)) / successful_tests >= 0.5: # 50% good or better
-                logger.info("\nOverall: Solid performance, consistently finding reasonable moves.")
+            excellent_ratio = sum(categories_count[cat] for cat in excellent_cats) / successful_tests
+            good_ratio = (sum(categories_count[cat] for cat in excellent_cats) + sum(categories_count[cat] for cat in good_cats)) / successful_tests
+            
+            if excellent_ratio >= 0.6:
+                logger.info("\nOverall: 🎯 Outstanding performance! Consistently finding optimal moves.")
+            elif excellent_ratio >= 0.4:
+                logger.info("\nOverall: 🎯 Commendable performance, often finding top-tier moves.")
+            elif good_ratio >= 0.6:
+                logger.info("\nOverall: ✅ Solid performance, consistently finding reasonable moves.")
             else:
-                logger.info("\nOverall: Room for improvement, struggles with consistency.")
+                logger.info("\nOverall: ⚠️ Room for improvement, struggles with consistency.")
 
+        # Save results if requested
+        if args.save_results:
+            try:
+                with open(args.save_results, 'w') as f:
+                    json.dump({
+                        'test_config': {
+                            'count': args.count,
+                            'difficulty': args.difficulty,
+                            'pattern': args.pattern,
+                            'sources_used': list(source_performance.keys()) if source_performance else [],
+                            'benchmark_mode': args.benchmark
+                        },
+                        'summary': {
+                            'total_positions': total_tests,
+                            'average_eval_diff_cp': average_diff_cp if valid_comparisons > 0 else None,
+                            'category_counts': categories_count,
+                            'source_performance': source_performance,
+                            'pattern_performance': pattern_performance,
+                            'excellent_ratio': excellent_ratio if successful_tests > 0 else 0,
+                            'good_ratio': good_ratio if successful_tests > 0 else 0
+                        },
+                        'detailed_results': overall_results_summary
+                    }, f, indent=2)
+                logger.info(f"\n💾 Detailed results saved to: {args.save_results}")
+            except Exception as e:
+                logger.error(f"❌ Failed to save results: {e}")
 
     logger.info(f"\n✅ Move quality test completed!")
 
