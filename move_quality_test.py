@@ -16,7 +16,7 @@ import chess
 import chess.pgn
 import chess.engine
 from stockfish import Stockfish
-from pure_nn_engine import Engine
+from search_coordinator import PureNeuralNetworkEngine as Engine
 import random
 import sys
 import os

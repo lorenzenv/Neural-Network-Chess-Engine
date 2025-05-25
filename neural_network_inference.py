@@ -229,11 +229,13 @@ class NeuralNetworkEvaluator:
                     
                     ordering_score = 0.5
                     if is_white_turn:
-                        # White wants LOW scores (lower is better)
-                        ordering_score = raw_nn_score  
+                        # White wants HIGH raw scores (better for White)
+                        # Lower ordering score = higher priority
+                        ordering_score = 1.0 - raw_nn_score  
                     else:
-                        # Black wants LOW scores (lower raw score = higher ordering score)
-                        ordering_score = 1.0 - raw_nn_score
+                        # Black wants LOW raw scores (worse for White = better for Black)
+                        # Lower ordering score = higher priority
+                        ordering_score = raw_nn_score
                     
                     move_scores[move] = ordering_score
 
