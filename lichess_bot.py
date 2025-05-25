@@ -13,7 +13,15 @@ from typing import Dict, Optional, Any
 import chess
 import chess.pgn
 import berserk
-from pure_nn_engine import Engine, ENGINE_VERSION, ENGINE_NAME, ENGINE_FEATURES
+from search_coordinator import PureNeuralNetworkEngine
+
+# Engine compatibility constants
+ENGINE_VERSION = "2.3.0"
+ENGINE_NAME = "Pure Neural Network Chess Engine"
+ENGINE_FEATURES = ["Neural Network Evaluation", "Alpha-Beta Search", "Move Ordering"]
+
+# Compatibility alias
+Engine = PureNeuralNetworkEngine
 
 # Configure logging
 logging.basicConfig(
