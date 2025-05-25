@@ -24,8 +24,8 @@ class SearchConfig:
     SEARCH_TIME_DEEP = 15.0      # Deep analysis
     
     # Search depth limits
-    MAX_SEARCH_DEPTH = 12
-    QUIESCENCE_MAX_DEPTH = 6
+    MAX_SEARCH_DEPTH = 8
+    QUIESCENCE_MAX_DEPTH = 4
     
     # Alpha-beta optimizations
     TRANSPOSITION_TABLE_SIZE = 2**20
@@ -34,7 +34,7 @@ class SearchConfig:
     LMR_MIN_MOVES = 4
     
     # Aspiration window settings
-    INITIAL_ASPIRATION_WINDOW = 50
+    INITIAL_ASPIRATION_WINDOW = 100
     ASPIRATION_WINDOW_SCALING = 0.8
     
     # Time extension factors
@@ -90,11 +90,11 @@ class ZobristHasher:
                     piece_obj = chess.Piece(piece, color)
                     self.piece_hashes[(piece_obj, square)] = np.random.randint(0, 2**64, dtype=np.uint64)
         
-        # Castling rights hashes
-        for rights in [chess.BB_ALL, chess.BB_H1, chess.BB_A1, 0]:  # White castling placeholder
-            self.castling_hashes[('white', rights)] = np.random.randint(0, 2**64, dtype=np.uint64)
-        for rights in [chess.BB_ALL, chess.BB_H8, chess.BB_A8, 0]:  # Black castling placeholder  
-            self.castling_hashes[('black', rights)] = np.random.randint(0, 2**64, dtype=np.uint64)
+        # Castling rights hashes for each of the 4 rights
+        self.castling_hashes['K'] = np.random.randint(0, 2**64, dtype=np.uint64)  # White kingside (chess.BB_H1)
+        self.castling_hashes['Q'] = np.random.randint(0, 2**64, dtype=np.uint64)  # White queenside (chess.BB_A1)
+        self.castling_hashes['k'] = np.random.randint(0, 2**64, dtype=np.uint64)  # Black kingside (chess.BB_H8)
+        self.castling_hashes['q'] = np.random.randint(0, 2**64, dtype=np.uint64)  # Black queenside (chess.BB_A8)
         
         # En passant file hashes
         for file in range(8):
@@ -112,11 +112,15 @@ class ZobristHasher:
         if board.turn == chess.BLACK:
             hash_value ^= self.turn_hash
         
-        # Hash castling rights (simplified)
-        white_castling = board.castling_rights & 3  # White castling bits
-        black_castling = board.castling_rights & 12  # Black castling bits
-        hash_value ^= self.castling_hashes[('white', white_castling)]
-        hash_value ^= self.castling_hashes[('black', black_castling)]
+        # Hash castling rights explicitly
+        if board.has_kingside_castling_rights(chess.WHITE):
+            hash_value ^= self.castling_hashes['K']
+        if board.has_queenside_castling_rights(chess.WHITE):
+            hash_value ^= self.castling_hashes['Q']
+        if board.has_kingside_castling_rights(chess.BLACK):
+            hash_value ^= self.castling_hashes['k']
+        if board.has_queenside_castling_rights(chess.BLACK):
+            hash_value ^= self.castling_hashes['q']
         
         # Hash en passant
         if board.ep_square is not None:
@@ -270,7 +274,7 @@ class SearchCoordinator:
             # Order moves for this depth
             ordered_moves = self.move_orderer.order_moves(self.board, legal_moves, 0)
             
-            for move in ordered_moves:
+            for i, move in enumerate(ordered_moves):
                 if self._time_up():
                     break
                 
@@ -313,7 +317,18 @@ class SearchCoordinator:
         # Check for terminal positions
         is_terminal, terminal_score = detect_terminal_position(self.board.fen())
         if is_terminal:
-            return terminal_score
+            # If it's a checkmate, adjust score by ply to prioritize faster mates.
+            # A mate found at a lower ply (deeper in the search from the current node) 
+            # means it takes more moves to achieve from the root of this sub-search.
+            if abs(terminal_score) == NeuralNetworkConfig.CHECKMATE_SCORE:
+                # Ensure the sign of ply adjustment matches the sign of the score
+                # CHECKMATE_SCORE is positive if white mates, negative if black mates.
+                # We want to make the score slightly less extreme (closer to 0) as ply increases.
+                if terminal_score > 0: # White is mating
+                    return terminal_score - ply
+                else: # Black is mating
+                    return terminal_score + ply # Adding a positive ply to a negative score makes it less negative
+            return terminal_score # For stalemates, etc., which are not ply-dependent in the same way
         
         # Transposition table probe
         zobrist_key = self.zobrist_hasher.hash_position(self.board)

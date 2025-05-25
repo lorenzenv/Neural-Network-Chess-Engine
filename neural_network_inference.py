@@ -14,7 +14,7 @@ The only exceptions are:
 
 import chess
 import numpy as np
-from util import bitifyFEN
+from util import bitifyFEN, beautifyFEN
 try:
     from tflite_runtime.interpreter import Interpreter
 except ImportError:
@@ -48,7 +48,7 @@ class NeuralNetworkConfig:
     # Search integration settings
     NN_MOVE_ORDERING_CONFIDENCE = 0.6    # When to trust NN move ordering
     
-    # 🚨 NO CLASSICAL BLENDING - This is pure NN
+    # 🚨 EMPHASIS ON NN: This engine relies purely on its neural network evaluations.
     MINIMAL_SAFETY_FACTOR = 0.05         # Tiny safety margin for terminal detection only
 
 class NeuralNetworkEvaluator:
@@ -70,6 +70,12 @@ class NeuralNetworkEvaluator:
         self.input_details = self.interpreter.get_input_details()
         self.output_details = self.interpreter.get_output_details()
         
+        # 💡 Basic Caching
+        self.comparison_cache = {}
+        self.evaluation_cache = {}
+        self.cache_hits = 0
+        self.cache_misses = 0
+        
         # 🛡️ Philosophy check
         _check_philosophy_violation(str(self.__dict__))
     
@@ -79,22 +85,37 @@ class NeuralNetworkEvaluator:
         Returns 0.0-1.0 where >0.5 means fen1 is better for white than fen2.
         
         🚨 NO CHESS KNOWLEDGE - only NN inference.
+        FIXED: Following README logic more closely.
         """
+        # 💡 Check cache
+        cache_key = (fen1, fen2)
+        if cache_key in self.comparison_cache:
+            self.cache_hits += 1
+            return self.comparison_cache[cache_key]
+        
         try:
-            # Convert FENs to NN input format
-            bitboard1 = bitifyFEN(fen1)
-            bitboard2 = bitifyFEN(fen2)
+            # Convert FENs to NN input format - EXACTLY like training
+            beautified1 = beautifyFEN(fen1)
+            beautified2 = beautifyFEN(fen2)
+            bitboard1 = bitifyFEN(beautified1)
+            bitboard2 = bitifyFEN(beautified2)
             
-            # Prepare NN input
-            combined_input = np.concatenate([bitboard1, bitboard2]).astype(np.float32)
-            input_data = np.array([combined_input])
+            # Prepare NN inputs as separate tensors (matching our TFLite model architecture)
+            input_data1 = np.array([bitboard1]).astype(np.float32)
+            input_data2 = np.array([bitboard2]).astype(np.float32)
             
-            # NN inference
-            self.interpreter.set_tensor(self.input_details[0]['index'], input_data)
+            # NN inference with two separate inputs (as our TFLite model expects)
+            self.interpreter.set_tensor(self.input_details[0]['index'], input_data1)
+            self.interpreter.set_tensor(self.input_details[1]['index'], input_data2)
             self.interpreter.invoke()
             result = self.interpreter.get_tensor(self.output_details[0]['index'])
             
-            return float(result[0][0])
+            comparison_result = float(result[0][0])
+            
+            # 💡 Store in cache
+            self.comparison_cache[cache_key] = comparison_result
+            self.cache_misses += 1
+            return comparison_result
             
         except Exception as e:
             print(f"NN inference error: {e}")
@@ -134,82 +155,97 @@ class NeuralNetworkEvaluator:
         """
         Evaluate a position by comparing against a reference position.
         
-        🚨 PURE NN: Uses only starting position as universal reference.
+        🚨 PURE NN: Uses only starting position as universal reference OR parent FEN.
         No chess knowledge about what makes a "good" reference.
+        MODIFIED: Terminal checks (checkmate, stalemate) are commented out.
         """
-        if reference_fen is None:
+        # 💡 Check cache (use position_fen and reference_fen as key)
+        cache_key = (position_fen, reference_fen) # reference_fen can be None
+        if cache_key in self.evaluation_cache:
+            self.cache_hits += 1
+            return self.evaluation_cache[cache_key]
+
+        _reference_fen = reference_fen
+        if _reference_fen is None:
             # Use starting position as universal reference (learned in training)
-            reference_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            # This will be used for the root node of the search.
+            _reference_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         
         try:
-            # Handle terminal positions (basic chess rules only)
-            board = chess.Board(position_fen)
-            if board.is_checkmate():
-                return -NeuralNetworkConfig.CHECKMATE_SCORE if board.turn == chess.WHITE else NeuralNetworkConfig.CHECKMATE_SCORE
-            if board.is_stalemate() or board.is_insufficient_material():
-                return NeuralNetworkConfig.STALEMATE_SCORE
+            # MODIFIED: Terminal checks removed/commented out
+            # board = chess.Board(position_fen)
+            # if board.is_checkmate():
+            #     return -NeuralNetworkConfig.CHECKMATE_SCORE if board.turn == chess.WHITE else NeuralNetworkConfig.CHECKMATE_SCORE
+            # if board.is_stalemate() or board.is_insufficient_material():
+            #     return NeuralNetworkConfig.STALEMATE_SCORE
             
             # Pure NN comparison
-            comparison_score = self.compare_positions_with_symmetry(position_fen, reference_fen)
+            comparison_score = self.compare_positions_with_symmetry(position_fen, _reference_fen)
             
             # Convert comparison to evaluation score
-            if comparison_score >= 0.5:
-                # Position better than reference for white
-                eval_score = (comparison_score - 0.5) * 2.0 * 600  # Scale to centipawn-like range
-            else:
-                # Position worse than reference for white
-                eval_score = (comparison_score - 0.5) * 2.0 * 600  # Negative score
+            # NN output: >0.5 means position_fen is better for White than _reference_fen
+            # Standard chess scores: positive for White's advantage, negative for Black's advantage
+            eval_score = (comparison_score - 0.5) * 2.0 * 600  # Scale to centipawn-like range
             
             # Apply safety bounds (NOT chess evaluation)
             eval_score = max(NeuralNetworkConfig.MIN_SAFE_EVALUATION_BOUND, 
                            min(NeuralNetworkConfig.MAX_SAFE_EVALUATION_BOUND, eval_score))
             
+            # 💡 Store in cache
+            self.evaluation_cache[cache_key] = eval_score
+            self.cache_misses += 1
             return eval_score
             
         except Exception as e:
-            print(f"NN position evaluation error: {e}")
+            print(f"NN position evaluation error: {e} for FEN: {position_fen} vs REF: {_reference_fen}")
             return 0.0
     
     def evaluate_moves_for_ordering(self, current_fen: str, candidate_moves: list) -> dict:
         """
         Evaluate candidate moves for ordering using pure NN inference.
+        Compares the resulting position of a move (parent) against the child position.
         
         🚨 PURE NN: No chess knowledge about move types, just NN scores.
+        FIXED: Compares parent to child with correct scoring interpretation.
         """
-        move_scores = {}
+        move_scores = {} # Stores {move: score_for_current_player}
         
         if not candidate_moves:
             return move_scores
         
         try:
             board = chess.Board(current_fen)
+            is_white_turn = (board.turn == chess.WHITE)
             
             for move in candidate_moves:
                 try:
-                    # Make move and get resulting position
                     board.push(move)
                     resulting_fen = board.fen()
-                    board.pop()
+                    board.pop() # Backtrack
                     
-                    # Evaluate resulting position with NN
-                    position_score = self.evaluate_position_against_reference(resulting_fen)
+                    # FIXED: Compare parent vs child (not child vs parent)
+                    # This gives us "is parent better than child" from White's perspective
+                    raw_nn_score = self.compare_positions_with_symmetry(current_fen, resulting_fen)
                     
-                    # Convert to move score (higher = better for current player)
-                    if board.turn == chess.WHITE:
-                        move_score = position_score  # White wants higher scores
+                    ordering_score = 0.5
+                    if is_white_turn:
+                        # White wants LOW scores (lower is better)
+                        ordering_score = raw_nn_score  
                     else:
-                        move_score = -position_score  # Black wants lower scores for white
+                        # Black wants LOW scores (lower raw score = higher ordering score)
+                        ordering_score = 1.0 - raw_nn_score
                     
-                    # Normalize to 0-1 range for move ordering
-                    normalized_score = (move_score + NeuralNetworkConfig.MAX_SAFE_EVALUATION_BOUND) / (2 * NeuralNetworkConfig.MAX_SAFE_EVALUATION_BOUND)
-                    move_scores[move] = max(0.0, min(1.0, normalized_score))
-                    
+                    move_scores[move] = ordering_score
+
                 except Exception as e:
-                    print(f"Error evaluating move {move}: {e}")
-                    move_scores[move] = 0.5  # Neutral score if error
+                    print(f"Error evaluating move {move} for ordering (FEN: {current_fen}): {e}")
         
         except Exception as e:
-            print(f"NN move evaluation error: {e}")
+            # This catches errors like invalid current_fen before move iteration.
+            print(f"NN move ordering major error for FEN {current_fen}: {e}")
+            # Fallback: give all moves neutral score if the initial FEN or board setup fails.
+            for move_obj in candidate_moves: # Ensure we are iterating over the original list if board setup failed
+                move_scores[move_obj] = 0.5
         
         return move_scores
 
@@ -246,21 +282,23 @@ def detect_terminal_position(fen: str) -> tuple:
     Returns (is_terminal, score) - ONLY for game end detection.
     
     🚨 This is NOT evaluation - only prevents search from continuing illegally.
+    MODIFIED: This function now always returns (False, 0.0) as per user request
+    to remove terminal condition checks.
     """
     try:
-        board = chess.Board(fen)
+        # board = chess.Board(fen) # Original
         
-        if board.is_checkmate():
-            score = -NeuralNetworkConfig.CHECKMATE_SCORE if board.turn == chess.WHITE else NeuralNetworkConfig.CHECKMATE_SCORE
-            return True, score
+        # if board.is_checkmate(): # Original
+        #     score = -NeuralNetworkConfig.CHECKMATE_SCORE if board.turn == chess.WHITE else NeuralNetworkConfig.CHECKMATE_SCORE # Original
+        #     return True, score # Original
         
-        if board.is_stalemate() or board.is_insufficient_material():
-            return True, NeuralNetworkConfig.STALEMATE_SCORE
+        # if board.is_stalemate() or board.is_insufficient_material(): # Original
+        #     return True, NeuralNetworkConfig.STALEMATE_SCORE # Original
         
-        return False, 0.0
+        return False, 0.0 # Always return False, 0.0
         
-    except Exception:
-        return False, 0.0
+    except Exception: # Original
+        return False, 0.0 # Original
 
 # 🛡️ FINAL PHILOSOPHY CHECK
 def validate_pure_nn_philosophy():

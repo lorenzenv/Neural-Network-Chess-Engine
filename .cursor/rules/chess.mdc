@@ -1,7 +1,7 @@
 ---
 description: 
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
 model.tflite Information and Usage Guide
 This document describes the model.tflite neural network model, its expected inputs/outputs, and how to correctly use it for chess position evaluation within a search algorithm, based on insights gained from integrating it into chess_engine.py and understanding the original training methodology.

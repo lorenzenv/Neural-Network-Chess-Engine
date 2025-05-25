@@ -1,85 +1,129 @@
-# Neural Network Chess Engine
+This model is a comparision model.
 
-A hybrid chess engine combining a neural network position evaluation model with classical alpha-beta search.
-
-## Recent Major Improvements (v2.2.0)
-
-🔧 **Critical Bug Fix**: Corrected neural network bitboard conversion in `util.py`
-- Replaced broken implementation with the original correct version
-- Fixed `beautifyFEN` function to properly parse FEN strings (65 elements: 64 squares + turn)
-- Fixed `bitifyFEN` function for proper 769-bit bitboard conversion (12 piece types × 64 + turn)
-- **Neural network now working optimally** with real position comparisons
-
-🚀 **Performance Improvements**:
-- Enhanced classical evaluation with piece-square tables and positional factors
-- Improved move ordering with queen move prioritization
-- Better search extensions and time management
-- Hybrid NN-classical evaluation blend for stability
-
-📊 **Latest Testing Results**: 
-- **3 out of 8 excellent moves** (37.5% optimal) including 2 perfect Stockfish matches
-- **1 very good move** (12.5%) - close to optimal
-- Average evaluation difference: **96 centipawns** from Stockfish
-- **Major improvement** from previous broken state
-
-## Key Features
-
-- **Comparison Model Neural Network**: Uses TensorFlow Lite model trained on 2M positions
-- **Hybrid Evaluation**: Blends neural network and classical evaluation
-- **Alpha-Beta Search**: With transposition tables, killer moves, and quiescence search  
-- **Multiple Speed Modes**: Fast/Balanced/Strong for different time controls
-- **Comprehensive Testing**: Automated test suite with real game positions
-
-## Usage
+the simplest way to use it would be:no
 
 ```python
-from chess_engine import Engine
+import chess
+import tfdeploy as td
+import itertools
+import copy
+from util import *
 
-# Create engine with starting position
-engine = Engine("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1")
+model = td.Model("model.pkl")
+x = model.get("input")
+y = model.get("output")
 
-# Get best move
-move = engine.get_move()
-print(f"Best move: {move}")
+def netPredict(first, second):
+	global model
+	global x
+	global y
+
+	x_1 = bitifyFEN(beautifyFEN(first.fen()))
+	x_2 = bitifyFEN(beautifyFEN(second.fen()))
+	toEval = [[x_1], [x_2]]
+	result = y.eval({x: toEval})
+
+	if result[0][0] > result [0][1]:
+		return (first, second)
+	else:
+		return (second, first)
+
+def alphabeta(node, depth, alpha, beta, maximizingPlayer):
+	if depth == 0:
+		return node
+	if maximizingPlayer:
+		v = -1
+		for move in node.legal_moves:
+			cur = copy.copy(node)
+			cur.push(move)
+			if v == -1:
+				v = alphabeta(cur, depth-1, alpha, beta, False) 
+			if alpha == -1:
+				alpha = v
+		
+			v = netPredict(v, alphabeta(cur, depth-1, alpha, beta, False))[0]
+			alpha = netPredict(alpha, v)[0] 
+			if beta != 1:
+				if netPredict(alpha, beta)[0] == alpha:
+					break
+		return v 
+	else:
+		v = 1
+		for move in node.legal_moves:
+			cur = copy.copy(node)
+			cur.push(move)
+			if v == 1:
+				v = alphabeta(cur, depth-1, alpha, beta, True) 
+			if beta == 1:
+				beta = v
+			
+			v = netPredict(v, alphabeta(cur, depth-1, alpha, beta, True))[1]
+			beta = netPredict(beta, v)[1] 
+			if alpha != -1:
+				if netPredict(alpha, beta)[0] == alpha:
+					break
+		return v 
+
+def computerMove(board, depth):
+	alpha = -1
+	beta = 1
+	v = -1
+	for move in board.legal_moves:
+		cur = copy.copy(board)
+		cur.push(move)
+		if v == -1:
+			v = alphabeta(cur, depth-1, alpha, beta, False)
+			bestMove = move
+			if alpha == -1:
+				alpha = v
+		else:
+			new_v = netPredict(alphabeta(cur, depth-1, alpha, beta, False), v)[0]
+			if new_v != v:
+				bestMove = move
+				v = new_v
+			alpha = netPredict(alpha, v)[0] 
+
+	print(bestMove)	
+	board.push(bestMove)
+	return board
+
+def playerMove(board):
+	while True:
+		try:
+			move = raw_input("Enter your move \n")
+			board.push_san(move)
+			break
+		except ValueError:
+			print("Illegal move, please try again")
+
+	return board
+
+def playGame():
+	moveTotal = 0;
+	board = chess.Board()
+	depth = raw_input("Enter search depth \n")
+	depth = int(depth)
+	while board.is_game_over() == False:
+		print(board)
+		if moveTotal % 2 == 1:
+			board = playerMove(board)
+		else:
+			board =	computerMove(board, depth)
+		moveTotal = moveTotal+1
+	
+	print(board)
+	print("Game is over")
+		
+
+#firstBoard = bitifyFEN(beautifyFEN(firstBoard.fen()))
+#secondBoard = bitifyFEN(beautifyFEN(secondBoard.fen()))
+#firstBoard = firstBoard + secondBoard
+#for elem in secondBoard:
+#	firstBoard.append(elem)
+#print(firstBoard)
+#result = y.eval({x: firstBoard})
+#playGame()
+#print(result)i
+#computerMove(chess.Board())a
+playGame()
 ```
-
-## Speed Modes
-
-- **Fast**: 3s per move, depth 6 (default for online play)  
-- **Balanced**: 5s per move, depth 6
-- **Strong**: 15s per move, depth 8
-
-Change in `chess_engine.py`:
-```python
-Config.SPEED_MODE = "fast"  # or "balanced", "strong"
-```
-
-## Testing
-
-Run move quality tests:
-```bash
-python3 move_quality_test.py --count 10 --tactical 5
-```
-
-## Model Details
-
-The neural network is a **comparison model** trained to compare two chess positions, not provide absolute evaluations. See `model_info.md` for detailed technical information.
-
-## Files
-
-- `chess_engine.py`: Main engine implementation
-- `util.py`: Bitboard conversion utilities (**now fixed**)
-- `model.tflite`: Neural network model (1.9MB)
-- `move_quality_test.py`: Comprehensive testing framework
-- `lichess_bot.py`: Lichess integration for online play
-
-## Requirements
-
-```
-python-chess==1.999
-tensorflow-lite-runtime
-numpy
-stockfish
-```
-
-Install with: `pip install -r requirements.txt`

@@ -1,6 +1,5 @@
 ---
 description: 
 globs: 
-alwaysApply: true
+alwaysApply: false
 ---
-whats important to me is that we do not add too much "chess knowledge". this should be a pure NN chess engine

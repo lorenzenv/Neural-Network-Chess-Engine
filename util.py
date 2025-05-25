@@ -57,29 +57,28 @@ def bitifyFEN(f):
 	arrs = []
 	result = []
 	s = 	{
-		'1' : 0,
-		'2' : 1,
-		'3' : 2,
-		'4' : 3,
-		'5' : 4,
-		'6' : 5,
-		'-1' : 6,
-		'-2' : 7,
-		'-3' : 8,
-		'-4' : 9,
-		'-5' : 10,
-		'-6' : 11,
+		1 : 0,
+		2 : 1,
+		3 : 2,
+		4 : 3,
+		5 : 4,
+		6 : 5,
+		-1 : 6,
+		-2 : 7,
+		-3 : 8,
+		-4 : 9,
+		-5 : 10,
+		-6 : 11,
 		}
 		 	
 	for i in range(12):
 		arrs.append(np.zeros(64))
 
 	for i in range(64):
-		c = str(int(f[i]))
-		if c != '0':
-			c = s[c]
-		 	#c = s[int(round(c))]
-			arrs[c][i] = 1
+		piece_value = f[i]
+		if piece_value != 0:
+			piece_type = s[piece_value]
+			arrs[piece_type][i] = 1
 
 	for i in range(12):
 		result.append(arrs[i])
