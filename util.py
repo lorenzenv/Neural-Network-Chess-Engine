@@ -92,56 +92,5 @@ def bitifyFEN(f):
 	
 	return result
 
-def arrToBin(arr):
-	first = arr[0]
-	second = arr[1]
-
-	#r1 = np.array_str(first) 
-	#r2 = np.array_str(second)
-
-	#r1 = r1.translate(None, '[] ')
-	#r2 = r2.translate(None, '[] ')
-
-	#print(r1)
-	#for i in range(65):
-	#	r1 = r1.join(str(first[i]))
-	#	r2 = r2.join(str(second[i]))
-
-	r1 = bitifyFEN(first)
-	r2 = bitifyFEN(second)
-	return [r1,r2]
-	
-def convert():
-	batches = 0;
-	final = []
-	final_l = []
-	for i in range(24):
-		print(i)
-		name = 'pGames/volume' + str(batches) + '.p'
-		f = open(name)
-		data = pickle.load(f) 
-		x = data['x']
-		x_l = data['x_labels']
-		for j in range(25000):
-			if j%1000 == 0:	
-				print(j)
-			final.append(arrToBin(x[j]))
-			final_l.append(x_l[j])	
-		f.close()
-		
-		if i > 0 and i%5 == 0:
-			temp = open('cvol' + str(i) + '.p', "wb")
-			full_data = {"x": final, "x_labels": final_l}
-			pickle.dump(full_data, temp)
-			temp.close()
-			final = []
-			final_l = []
-
-	f = open('converted.p', "wb")
-	full_data = {"x": final, "x_labels": final_l}
-	pickle.dump(full_data, f)
-	f.close()
-	return
-
 #convert()
 #bitifyFEN(beautifyFEN('rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e3 0 1'))

@@ -33,10 +33,6 @@ def _check_philosophy_violation(code_text: str):
 class NeuralNetworkConfig:
     """Configuration for pure NN inference - NO CHESS KNOWLEDGE."""
     
-    # NN confidence and reliability settings
-    NN_CONFIDENCE_THRESHOLD = 0.9        # How confident must NN be to trust fully?
-    NN_RELIABILITY_FACTOR = 0.85         # Overall NN trust factor
-    
     # Safety bounds (NOT evaluation heuristics)
     MAX_SAFE_EVALUATION_BOUND = 800      # Prevent NN from giving extreme scores
     MIN_SAFE_EVALUATION_BOUND = -800     # Keep evaluations reasonable
@@ -44,12 +40,6 @@ class NeuralNetworkConfig:
     # Terminal position handling (basic chess rules only)
     CHECKMATE_SCORE = 15000              # Score for checkmate detection
     STALEMATE_SCORE = 0                  # Score for stalemate detection
-    
-    # Search integration settings
-    NN_MOVE_ORDERING_CONFIDENCE = 0.6    # When to trust NN move ordering
-    
-    # 🚨 EMPHASIS ON NN: This engine relies purely on its neural network evaluations.
-    MINIMAL_SAFETY_FACTOR = 0.05         # Tiny safety margin for terminal detection only
 
 class NeuralNetworkEvaluator:
     """
@@ -250,57 +240,6 @@ class NeuralNetworkEvaluator:
                 move_scores[move_obj] = 0.5
         
         return move_scores
-
-# 🚨 SAFETY FUNCTIONS: Only for preventing crashes, NOT for evaluation
-def minimal_material_count(fen: str) -> float:
-    """
-    MINIMAL material counting ONLY for safety bounds.
-    This is NOT for evaluation - only to prevent illegal moves.
-    
-    🚨 This should NEVER influence position evaluation.
-    """
-    try:
-        board = chess.Board(fen)
-        
-        # Basic piece values for safety only
-        piece_values = {
-            chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
-            chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0
-        }
-        
-        white_material = sum(len(board.pieces(piece_type, chess.WHITE)) * value 
-                           for piece_type, value in piece_values.items())
-        black_material = sum(len(board.pieces(piece_type, chess.BLACK)) * value 
-                           for piece_type, value in piece_values.items())
-        
-        return (white_material - black_material) * 100  # Convert to centipawn scale
-        
-    except Exception:
-        return 0.0
-
-def detect_terminal_position(fen: str) -> tuple:
-    """
-    Detect terminal positions using basic chess rules.
-    Returns (is_terminal, score) - ONLY for game end detection.
-    
-    🚨 This is NOT evaluation - only prevents search from continuing illegally.
-    MODIFIED: This function now always returns (False, 0.0) as per user request
-    to remove terminal condition checks.
-    """
-    try:
-        # board = chess.Board(fen) # Original
-        
-        # if board.is_checkmate(): # Original
-        #     score = -NeuralNetworkConfig.CHECKMATE_SCORE if board.turn == chess.WHITE else NeuralNetworkConfig.CHECKMATE_SCORE # Original
-        #     return True, score # Original
-        
-        # if board.is_stalemate() or board.is_insufficient_material(): # Original
-        #     return True, NeuralNetworkConfig.STALEMATE_SCORE # Original
-        
-        return False, 0.0 # Always return False, 0.0
-        
-    except Exception: # Original
-        return False, 0.0 # Original
 
 # 🛡️ FINAL PHILOSOPHY CHECK
 def validate_pure_nn_philosophy():

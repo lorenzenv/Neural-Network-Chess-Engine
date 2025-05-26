@@ -12,7 +12,7 @@ import chess
 import chess.engine
 import time
 import numpy as np
-from neural_network_inference import NeuralNetworkEvaluator, NeuralNetworkConfig, detect_terminal_position
+from neural_network_inference import NeuralNetworkEvaluator, NeuralNetworkConfig
 
 # 🧠 SEARCH CONFIGURATION (Algorithm settings, NOT chess knowledge)
 class SearchConfig:
@@ -174,15 +174,11 @@ class MoveOrderer:
                 else:
                     score = 4500000 + int(nn_score * 400000)
             
-            # 3. Capture detection (basic move type, not evaluation)
-            elif board.is_capture(move):
-                score = 3000000  # Captures often good to try early
-            
-            # 4. Killer move heuristic (search optimization)
+            # 3. Killer move heuristic (search optimization)
             elif ply in self.killer_moves and move in self.killer_moves[ply]:
                 score = 2000000
             
-            # 5. Default score
+            # 4. Default score
             else:
                 score = 1000000
             
@@ -251,6 +247,8 @@ class SearchCoordinator:
         self.transposition_table.new_search()
         self._reset_search_stats()
         
+        root_fen_for_this_search_cycle = self.board.fen() # Capture current FEN as reference
+
         legal_moves = list(self.board.legal_moves)
         if not legal_moves:
             return None
@@ -268,31 +266,34 @@ class SearchCoordinator:
             
             print(f"🔍 Searching depth {depth}...")
             
-            current_best_move = None
-            current_best_score = float('-inf')
+            current_best_move_this_depth = None # Renamed to avoid confusion with overall best_move
+            current_best_score_this_depth = float('-inf') # Renamed
             
             # Order moves for this depth
-            ordered_moves = self.move_orderer.order_moves(self.board, legal_moves, 0)
+            # Pass current self.board which is the root for this get_best_move call
+            ordered_moves = self.move_orderer.order_moves(self.board, legal_moves, 0) 
             
             for i, move in enumerate(ordered_moves):
                 if self._time_up():
                     break
                 
                 self.board.push(move)
-                score = -self._alpha_beta(depth - 1, float('-inf'), float('inf'), 1, False)
+                # Pass root_fen_for_this_search_cycle as the leaf_reference_fen
+                score = -self._alpha_beta(depth - 1, float('-inf'), float('inf'), 1, False, leaf_reference_fen=root_fen_for_this_search_cycle)
                 self.board.pop()
                 
-                if score > current_best_score:
-                    current_best_score = score
-                    current_best_move = move
+                if score > current_best_score_this_depth:
+                    current_best_score_this_depth = score
+                    current_best_move_this_depth = move
             
-            if current_best_move:
-                best_move = current_best_move
-                best_score = current_best_score
+            if current_best_move_this_depth: # Check if a move was found at this depth
+                best_move = current_best_move_this_depth
+                best_score = current_best_score_this_depth
                 
                 # Store in transposition table
-                zobrist_key = self.zobrist_hasher.hash_position(self.board)
-                self.transposition_table.store(zobrist_key, depth, best_score, str(best_move), "EXACT")
+                # Key is for the root position of this get_best_move call
+                zobrist_key = self.zobrist_hasher.hash_position(chess.Board(root_fen_for_this_search_cycle))
+                self.transposition_table.store(zobrist_key, depth, best_score, str(best_move), "EXACT") # TT stores info about root_fen_for_this_search_cycle
                 
                 print(f"    Depth {depth}: {best_move} (NN eval: {best_score:.1f})")
         
@@ -300,35 +301,30 @@ class SearchCoordinator:
         nps = int(self.nodes_searched / elapsed) if elapsed > 0 else 0
         print(f"🏁 Search complete: {self.nodes_searched} nodes in {elapsed:.1f}s ({nps} NPS)")
         
-        return str(best_move) if best_move else str(legal_moves[0])
+        return str(best_move) if best_move else str(legal_moves[0]) # Fallback if no move found
     
-    def _alpha_beta(self, depth: int, alpha: float, beta: float, ply: int, is_pv_node: bool) -> float:
+    def _alpha_beta(self, depth: int, alpha: float, beta: float, ply: int, is_pv_node: bool, leaf_reference_fen: str) -> float:
         """
         Alpha-beta search using pure NN evaluation.
         
         🚨 NO CHESS KNOWLEDGE: Only uses NN for position evaluation.
         """
         self.nodes_searched += 1
+        initial_alpha = alpha # Preserve the original alpha for TT flag
         
         # Check time
         if self.nodes_searched % 1000 == 0 and self._time_up():
-            return 0.0
+            return NeuralNetworkConfig.STALEMATE_SCORE # Return a neutral score if time runs out
         
-        # Check for terminal positions
-        is_terminal, terminal_score = detect_terminal_position(self.board.fen())
-        if is_terminal:
-            # If it's a checkmate, adjust score by ply to prioritize faster mates.
-            # A mate found at a lower ply (deeper in the search from the current node) 
-            # means it takes more moves to achieve from the root of this sub-search.
-            if abs(terminal_score) == NeuralNetworkConfig.CHECKMATE_SCORE:
-                # Ensure the sign of ply adjustment matches the sign of the score
-                # CHECKMATE_SCORE is positive if white mates, negative if black mates.
-                # We want to make the score slightly less extreme (closer to 0) as ply increases.
-                if terminal_score > 0: # White is mating
-                    return terminal_score - ply
-                else: # Black is mating
-                    return terminal_score + ply # Adding a positive ply to a negative score makes it less negative
-            return terminal_score # For stalemates, etc., which are not ply-dependent in the same way
+        # Outcome of the game (checkmate, stalemate, etc.)
+        outcome = self.board.outcome()
+        if outcome:
+            if outcome.winner == chess.WHITE:
+                return NeuralNetworkConfig.CHECKMATE_SCORE - ply 
+            elif outcome.winner == chess.BLACK:
+                return -NeuralNetworkConfig.CHECKMATE_SCORE + ply 
+            else: # Stalemate or other draw
+                return NeuralNetworkConfig.STALEMATE_SCORE
         
         # Transposition table probe
         zobrist_key = self.zobrist_hasher.hash_position(self.board)
@@ -337,6 +333,8 @@ class SearchCoordinator:
         
         if tt_entry:
             tt_depth, tt_score, tt_move, tt_flag, tt_generation = tt_entry
+            # Ensure entry is from current search generation if TT generations are implemented fully
+            # For now, assume tt_generation check is implicitly handled or not strictly needed for this change
             if tt_depth >= depth:
                 self.tt_hits += 1
                 if tt_flag == "EXACT":
@@ -347,85 +345,99 @@ class SearchCoordinator:
                     beta = min(beta, tt_score)
                 
                 if alpha >= beta:
-                    return tt_score
-                
+                    return tt_score 
                 tt_best_move = tt_move
         
         # Reach depth limit - use quiescence or NN evaluation
         if depth <= 0:
-            return self._quiescence_search(alpha, beta, ply, 0)
+            return self._quiescence_search(alpha, beta, ply, 0, leaf_reference_fen)
         
         # Null move pruning (search optimization)
-        if (depth >= 3 and not self.board.is_check() and ply > 0):
-            self.board.push(chess.Move.null())
-            null_score = -self._alpha_beta(depth - 1 - SearchConfig.NULL_MOVE_REDUCTION, -beta, -alpha, ply + 1, False)
-            self.board.pop()
-            
-            if null_score >= beta:
-                self.null_move_cutoffs += 1
-                return beta
-        
+        if (depth >= 3 and not self.board.is_check() and ply > 0): # ply > 0 to avoid null move at root
+            # Make sure self.board allows null moves (e.g. not in zugzwang, though NN engine doesn't know zugzwang)
+            # python-chess board.push(chess.Move.null()) handles legality.
+            try: # Protect against board states where null move is illegal (should be rare unless in check, already handled)
+                self.board.push(chess.Move.null())
+                null_score = -self._alpha_beta(depth - 1 - SearchConfig.NULL_MOVE_REDUCTION, -beta, -alpha, ply + 1, False, leaf_reference_fen)
+                self.board.pop()
+                
+                if null_score >= beta:
+                    self.null_move_cutoffs += 1
+                    # Storing to TT for null move cutoffs (key is for position *before* null move)
+                    # self.transposition_table.store(zobrist_key, depth, beta, None, "LOWERBOUND") # Example
+                    return beta 
+            except (AssertionError, ValueError): # Catch errors if null move is illegal on current board state
+                pass # Skip null move if illegal
+
         # Generate and order moves
         legal_moves = list(self.board.legal_moves)
-        if not legal_moves:
-            return 0.0  # Stalemate
+        if not legal_moves: 
+            # This should ideally be caught by board.outcome() earlier.
+            # If outcome() is None but no legal_moves, it's a stalemate.
+            return NeuralNetworkConfig.STALEMATE_SCORE 
         
         ordered_moves = self.move_orderer.order_moves(self.board, legal_moves, ply, tt_best_move)
         
-        best_score = float('-inf')
-        best_move = None
-        moves_tried = 0
+        best_score_found_in_loop = float('-inf') # Renamed from best_score to avoid conflict
+        best_move_for_tt = None 
+        moves_tried = 0 
         
-        for move in ordered_moves:
+        for i, move in enumerate(ordered_moves):
             if self._time_up():
                 break
             
             self.board.push(move)
             
-            # Late move reduction
             reduction = 0
             if (moves_tried >= SearchConfig.LMR_MIN_MOVES and 
                 depth >= 3 and 
-                not self.board.is_check() and 
-                not self.board.is_capture(move)):
+                not self.board.is_check() and # is_check on the board *after* the move
+                not self.board.is_capture(move) and # LMR usually not for captures
+                not move.promotion): # LMR usually not for promotions
                 reduction = SearchConfig.LATE_MOVE_REDUCTION
                 self.lmr_activations += 1
             
-            # Search with possible reduction
-            if moves_tried == 0 or not is_pv_node:
-                score = -self._alpha_beta(depth - 1 - reduction, -beta, -alpha, ply + 1, False)
+            current_node_score = 0
+            if moves_tried == 0 or not is_pv_node: 
+                current_node_score = -self._alpha_beta(depth - 1 - reduction, -beta, -alpha, ply + 1, False, leaf_reference_fen)
             else:
-                # PV search
-                score = -self._alpha_beta(depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, False)
-                if score > alpha:
-                    score = -self._alpha_beta(depth - 1, -beta, -alpha, ply + 1, True)
+                current_node_score = -self._alpha_beta(depth - 1 - reduction, -alpha - 1, -alpha, ply + 1, False, leaf_reference_fen)
+                if current_node_score > alpha and current_node_score < beta: 
+                    current_node_score = -self._alpha_beta(depth - 1 - reduction, -beta, -alpha, ply + 1, True, leaf_reference_fen)
             
             self.board.pop()
             moves_tried += 1
             
-            if score > best_score:
-                best_score = score
-                best_move = move
+            if current_node_score > best_score_found_in_loop:
+                best_score_found_in_loop = current_node_score
+                best_move_for_tt = move 
             
-            if score > alpha:
-                alpha = score
-                if is_pv_node:
-                    best_move = move
+            if current_node_score > alpha:
+                alpha = current_node_score
             
             if alpha >= beta:
-                # Beta cutoff
                 self.beta_cutoffs += 1
-                self.move_orderer.update_killer_move(ply, move)
-                break
+                if not move.drop: # chess.Move.drop is for Chess960, null move is chess.Move.null()
+                    self.move_orderer.update_killer_move(ply, move)
+                # TT store on beta cutoff: value is beta, flag is LOWERBOUND
+                # Key is for the position *before* this set of moves was tried
+                self.transposition_table.store(zobrist_key, depth, beta, str(move) if move else None, "LOWERBOUND")
+                return beta 
         
         # Store in transposition table
-        if best_move:
-            flag = "EXACT" if best_score > alpha and best_score < beta else "LOWERBOUND" if best_score >= beta else "UPPERBOUND"
-            self.transposition_table.store(zobrist_key, depth, best_score, str(best_move), flag)
-        
-        return best_score
+        if best_move_for_tt: 
+            flag = ""
+            if best_score_found_in_loop <= initial_alpha: 
+                flag = "UPPERBOUND"
+            elif best_score_found_in_loop >= beta: 
+                flag = "LOWERBOUND" 
+            else: 
+                flag = "EXACT"
+            self.transposition_table.store(zobrist_key, depth, best_score_found_in_loop, str(best_move_for_tt), flag)
+
+        return best_score_found_in_loop # Return the actual best score found
     
-    def _quiescence_search(self, alpha: float, beta: float, ply: int, q_depth: int) -> float:
+    def _quiescence_search(self, alpha: float, beta: float, ply: int, q_depth: int, leaf_reference_fen: str) -> float:
         """
         Quiescence search using NN evaluation.
         
@@ -433,30 +445,45 @@ class SearchCoordinator:
         """
         self.quiescence_nodes += 1
         
+        # Terminal check inside quiescence
+        outcome = self.board.outcome()
+        if outcome:
+            if outcome.winner == chess.WHITE: return NeuralNetworkConfig.CHECKMATE_SCORE - ply
+            if outcome.winner == chess.BLACK: return -NeuralNetworkConfig.CHECKMATE_SCORE + ply
+            return NeuralNetworkConfig.STALEMATE_SCORE
+
         if q_depth >= SearchConfig.QUIESCENCE_MAX_DEPTH:
-            # Use NN evaluation
-            nn_score = self.nn_evaluator.evaluate_position_against_reference(self.board.fen())
-            return nn_score if self.board.turn == chess.WHITE else -nn_score
+            # Use NN evaluation against the provided leaf_reference_fen
+            nn_score = self.nn_evaluator.evaluate_position_against_reference(self.board.fen(), reference_fen=leaf_reference_fen)
+            return nn_score if self.board.turn == chess.WHITE else -nn_score # Adjust for current player
         
-        # Stand pat evaluation using NN
-        stand_pat = self.nn_evaluator.evaluate_position_against_reference(self.board.fen())
-        if self.board.turn == chess.BLACK:
-            stand_pat = -stand_pat
+        # Stand pat evaluation using NN, against the provided leaf_reference_fen
+        stand_pat = self.nn_evaluator.evaluate_position_against_reference(self.board.fen(), reference_fen=leaf_reference_fen)
+        # Adjust stand_pat score for whose turn it is at the current board position
+        current_player_stand_pat = stand_pat if self.board.turn == chess.WHITE else -stand_pat
         
-        if stand_pat >= beta:
+        if current_player_stand_pat >= beta:
             return beta
-        if stand_pat > alpha:
-            alpha = stand_pat
+        if current_player_stand_pat > alpha:
+            alpha = current_player_stand_pat
         
-        # Only search captures in quiescence
-        captures = [move for move in self.board.legal_moves if self.board.is_capture(move)]
+        # Evaluate all legal moves in quiescence, relying on NN evaluation
+        legal_moves = list(self.board.legal_moves) 
+        if not legal_moves and not outcome: # Double check for stalemate if outcome missed it
+             return NeuralNetworkConfig.STALEMATE_SCORE
+
+        # Move ordering for quiescence could be beneficial, e.g. check-evasions, checks, then others.
+        # For now, iterate through them as python-chess provides them.
+        # A simple heuristic might be to try checks first if any:
+        # ordered_q_moves = sorted(legal_moves, key=lambda m: self.board.gives_check(m), reverse=True)
+        # For now, using legal_moves directly.
         
-        for move in captures:
-            if self._time_up():
-                break
+        for move in legal_moves: 
+            if self._time_up(): # Check time limit inside the loop
+                break 
             
             self.board.push(move)
-            score = -self._quiescence_search(-beta, -alpha, ply + 1, q_depth + 1)
+            score = -self._quiescence_search(-beta, -alpha, ply + 1, q_depth + 1, leaf_reference_fen)
             self.board.pop()
             
             if score >= beta:
