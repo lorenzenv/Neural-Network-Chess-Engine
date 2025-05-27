@@ -15,6 +15,7 @@ import time
 import numpy as np
 from neural_network_inference import NeuralNetworkEvaluator, NeuralNetworkConfig
 from collections import defaultdict
+from typing import Optional, Union, Dict, List, DefaultDict
 
 # 🧠 SEARCH CONFIGURATION (Algorithm settings, NOT chess knowledge)
 class SearchConfig:
@@ -599,12 +600,12 @@ class PureNeuralNetworkEngine:
     🚨 PURE NN PHILOSOPHY: This is a wrapper that ensures no chess knowledge.
     """
     
-    def __init__(self, fen: str = None):
+    def __init__(self, fen: Optional[str] = None):
         self.search_coordinator = SearchCoordinator(fen)
         print("🧠 Pure Neural Network Chess Engine initialized!")
         print("⚠️  ZERO chess knowledge - all evaluation from NN!")
     
-    def get_move(self, time_limit: float = None) -> str:
+    def get_move(self, time_limit: Optional[float] = None) -> Optional[str]:
         """Get best move using pure NN evaluation."""
         return self.search_coordinator.get_best_move(self.search_coordinator.board.fen(), time_limit)
     
