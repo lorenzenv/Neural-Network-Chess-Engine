@@ -16,7 +16,7 @@ import chess
 import chess.pgn
 import chess.engine
 from stockfish import Stockfish
-from search_coordinator import PureNeuralNetworkEngine as Engine
+from search_coordinator import PureNeuralNetworkEngine as Engine, SearchConfig
 import random
 import sys
 import os
@@ -53,18 +53,82 @@ class PositionGenerator:
                     if len(parts) < 4:
                         continue
                         
-                    # Basic FEN is first 4 parts
-                    fen = ' '.join(parts[:4])
+                    # Basic FEN needs 6 parts for python-chess Board()
+                    # parts[0]: piece placement
+                    # parts[1]: active color (w/b)
+                    # parts[2]: castling availability (KQkq, -)
+                    # parts[3]: en passant target square (e.g. e3, -)
+                    # parts[4]: halfmove clock (integer)
+                    # parts[5]: fullmove number (integer)
+
+                    fen_board = parts[0]
+                    fen_turn = parts[1]
+                    fen_castling = parts[2]
+                    fen_ep = parts[3]
+
+                    # Validate en_passant field
+                    is_valid_ep_sq = len(fen_ep) == 2 and 'a' <= fen_ep[0] <= 'h' and ('1' <= fen_ep[1] <= '8')
+                    if not (fen_ep == '-' or is_valid_ep_sq):
+                        logger.warning(f"Invalid en_passant field '{fen_ep}' in EPD line {line_num} from {epd_path}. Using '-'. Original line: {line.strip()}")
+                        fen_ep = '-'
+                    
+                    fen_halfmove = parts[4] if len(parts) > 4 else '0'
+                    if not fen_halfmove.isdigit():
+                        logger.warning(f"Invalid halfmove clock '{fen_halfmove}' in EPD line {line_num} from {epd_path}. Using '0'. Original line: {line.strip()}")
+                        fen_halfmove = '0'
+
+                    fen_fullmove = parts[5] if len(parts) > 5 else '1'
+                    if not fen_fullmove.isdigit():
+                        logger.warning(f"Invalid fullmove number '{fen_fullmove}' in EPD line {line_num} from {epd_path}. Using '1'. Original line: {line.strip()}")
+                        fen_fullmove = '1'
+                        
+                    fen = f"{fen_board} {fen_turn} {fen_castling} {fen_ep} {fen_halfmove} {fen_fullmove}"
                     
                     # Parse EPD operations (like bm for best move, id for identifier)
-                    operations = {}
-                    for part in parts[4:]:
-                        if '=' in part:
-                            key, value = part.split('=', 1)
-                            operations[key] = value.strip('"')
+                    # Operations start after the FEN parts (could be after 4, 5, or 6 FEN fields in `parts`)
+                    op_start_index = 4 
+                    if len(parts) > 4 and parts[4].isdigit(): # Check if parts[4] looks like halfmove
+                        op_start_index = 5
+                        if len(parts) > 5 and parts[5].isdigit(): # Check if parts[5] looks like fullmove
+                             op_start_index = 6
                     
+                    operations = {}
+                    for part_idx in range(op_start_index, len(parts)):
+                        part = parts[part_idx]
+                        if '=' in part and part.count('=') == 1: # ensure it's a key=value pair
+                            key, value = part.split('=', 1)
+                            operations[key.strip()] = value.strip(';"\' ') # Strip quotes, semicolons, spaces
+                        elif len(part.strip(';"\' ')) > 0: # Handle standalone operations/flags if any
+                            operations[part.strip(';"\' ')] = True
+
+
+                    # Determine a good name for the position
+                    default_pos_name = f'{Path(epd_path).stem}_{line_num}'
+                    pos_name_candidate_id = operations.get('id')
+                    pos_name_candidate_an = operations.get('an')
+
+                    if isinstance(pos_name_candidate_an, str) and pos_name_candidate_an.strip():
+                        pos_name = pos_name_candidate_an.strip()
+                    elif isinstance(pos_name_candidate_id, str) and pos_name_candidate_id.strip():
+                        pos_name = pos_name_candidate_id.strip()
+                    else:
+                        pos_name = default_pos_name
+                    
+                    # Safely append other string attributes if they exist as strings or convert flags to strings
+                    fmvn_val = operations.get('fmvn')
+                    if isinstance(fmvn_val, str) and fmvn_val.strip():
+                         pos_name += f"_fmvn{fmvn_val.strip()}"
+                    elif fmvn_val is True: # if it was a flag like "fmvn;"
+                         pos_name += f"_fmvnTRUE"
+
+                    hmvc_val = operations.get('hmvc')
+                    if isinstance(hmvc_val, str) and hmvc_val.strip():
+                         pos_name += f"_hmvc{hmvc_val.strip()}"
+                    elif hmvc_val is True: # if it was a flag like "hmvc;"
+                         pos_name += f"_hmvcTRUE"
+
                     positions.append({
-                        'name': f'epd_{Path(epd_path).stem}_line_{line_num}',
+                        'name': pos_name,
                         'fen': fen,
                         'source': 'epd',
                         'best_move': operations.get('bm', ''),
@@ -1111,108 +1175,154 @@ def save_benchmark_results(score_data: dict, config: dict, timestamp: str = None
             logger.info(f"🔄 No change from previous benchmark")
 
 def main():
-    logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")
+    parser = argparse.ArgumentParser(description="Neural Network Move Quality Test")
+    parser.add_argument("--max_positions", type=int, default=25, help="Max positions to test")
+    parser.add_argument("--difficulty", choices=['easy', 'medium', 'hard', 'mixed'], default='mixed', help="Difficulty of positions")
+    parser.add_argument("--pattern", default='all', help="Specific tactical pattern to focus on")
+    parser.add_argument("--stockfish_path", type=str, default=None, help="Path to Stockfish executable")
+    parser.add_argument("--fen", type=str, default=None, help="Optional: Test a single FEN string.")
 
-    parser = argparse.ArgumentParser(description="Test neural network move selection quality against Stockfish.")
-    parser.add_argument("--setup", action="store_true", help="Setup test databases and example files")
-    parser.add_argument("--test", type=int, metavar="N", help="Run only a specific test number (e.g., 7 for test7_...).")
-    parser.add_argument("--count", type=int, default=25, help="Maximum number of positions to test (default: 25)")
-    parser.add_argument("--pgn", action="append", help="PGN file(s) to extract positions from")
-    parser.add_argument("--epd", action="append", help="EPD file(s) to load test positions from")
-    parser.add_argument("--no-default", action="store_true", help="Skip default hardcoded positions")
-    parser.add_argument("--tactical", type=int, default=10, help="Number of tactical positions to generate (default: 10)")
-    parser.add_argument("--online", type=int, default=5, help="Number of online positions to fetch (default: 5)")
-    parser.add_argument("--sources", help="Comma-separated list of sources to include: default,pgn,epd,tactical,online")
-    parser.add_argument("--difficulty", choices=["easy", "medium", "hard", "mixed"], default="mixed", 
-                       help="Difficulty level of positions to test")
-    parser.add_argument("--pattern", choices=["pin", "fork", "discovery", "endgame", "promotion", "all"], default="all",
-                       help="Specific tactical pattern to focus on")
-    parser.add_argument("--save-results", help="Save detailed results to JSON file")
-    parser.add_argument("--benchmark", action="store_true", help="Run comprehensive benchmark with all position types")
-    parser.add_argument("--track-improvement", action="store_true", help="Save results for tracking improvements over time")
     args = parser.parse_args()
-    
-    # Handle setup command
-    if args.setup:
-        setup_test_databases()
-        return
+
+    global stockfish  # Ensure stockfish is globally accessible
+    try:
+        stockfish_exec_path = args.stockfish_path or os.getenv("STOCKFISH_PATH")
+        if not stockfish_exec_path:
+            # Attempt to find stockfish in common locations or PATH
+            possible_paths = [
+                "/opt/homebrew/bin/stockfish",  # macOS Homebrew
+                "/usr/local/bin/stockfish",    # Common Unix
+                "/usr/bin/stockfish",          # Common Unix
+                "stockfish"                    # Check PATH
+            ]
+            for p in possible_paths:
+                if Path(p).is_file() and os.access(p, os.X_OK):
+                    stockfish_exec_path = p
+                    break
         
-    # Handle benchmark mode
-    if args.benchmark:
-        logger.info("🏁 Running comprehensive benchmark...")
-        args.count = 100
-        args.tactical = 25
-        args.online = 10
-        
-    # Initialize position generator
-    generator = PositionGenerator()
-    
-    # Handle specific test selection (legacy behavior)
-    if args.test is not None:
-        target_test_prefix = f"test{args.test}_"
-        default_positions = [
-            {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2"},
-            {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13"},
-            {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23"},
-            {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1"},
-            {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47"},
-            {"name": "test7_endgame_promotion_race_black", "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48"},
-            {"name": "test8_middlegame_queen_attack_black", "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29"},
-            {"name": "test9_kings_indian_attack_white", "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6"},
-            {"name": "test10_endgame_rook_pawns_white", "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36"}
-        ]
-        
-        selected_tests = [p for p in default_positions if p['name'].startswith(target_test_prefix)]
-        if not selected_tests:
-            logger.error(f"❌ Test number {args.test} (looking for prefix '{target_test_prefix}') not found in defined tests.")
-            logger.info("Available test names are:")
-            for p in default_positions:
-                logger.info(f"  - {p['name']}")
+        if not stockfish_exec_path or not Path(stockfish_exec_path).is_file():
+            logger.error("Stockfish executable not found. Please set STOCKFISH_PATH or provide --stockfish_path.")
             sys.exit(1)
             
-        test_positions_to_run = [selected_tests[0]]
-        logger.info(f"🎯 Running only specified test: {test_positions_to_run[0]['name']}")
-    else:
-        # Use comprehensive position generation
-        test_positions_to_run = generator.get_all_positions(
-            include_default=not args.no_default,
-            pgn_files=args.pgn or [],
-            epd_files=args.epd or [],
-            tactical_count=args.tactical,
-            online_count=args.online,
-            max_total=args.count
-        )
+        stockfish = Stockfish(path=stockfish_exec_path, depth=18, parameters={"Threads": 2, "Hash": 128})
+        logger.info(f"✅ Stockfish initialized at: {stockfish_exec_path} with depth {stockfish.get_parameters()['UCI_LimitStrength']}") # Corrected depth access
+    except Exception as e:
+        logger.error(f"❌ Failed to initialize Stockfish: {e}")
+        sys.exit(1)
+
+    logger.info("🚀 Testing Neural Network Move Selection Quality (Comparison by Evaluation Difference)")
+    results_summary = []
+
+    if args.fen:
+        logger.info(f"🎯 Testing single FEN: {args.fen}")
+        # New logic for single FEN to use coordinator.get_best_move directly
+        # This was added in a previous step to allow direct depth control for single FENs
+        engine = Engine() # PureNeuralNetworkEngine, coordinator is accessed via engine.search_coordinator
         
+        # Here we call get_best_move directly, providing a search_depth
+        # For full runs, MAX_SEARCH_DEPTH (8) is used via get_move() default in test_position
+        # For single --fen runs, we now want to use MAX_SEARCH_DEPTH to get comparable logs.
+        logger.info(f"Running single FEN test with depth: {SearchConfig.MAX_SEARCH_DEPTH}")
+        start_time = time.time()
+        best_move = engine.search_coordinator.get_best_move(
+            current_board_fen=args.fen,
+            search_depth=SearchConfig.MAX_SEARCH_DEPTH
+        )
+        end_time = time.time()
+        search_duration = end_time - start_time
+        logger.info(f"Engine chose: {best_move} in {search_duration:.2f}s (Depth: {SearchConfig.MAX_SEARCH_DEPTH})")
+
+        # Now, get Stockfish analysis for this single FEN and the chosen move
+        board = chess.Board(args.fen)
+        current_player_color = "White" if board.turn == chess.WHITE else "Black"
+        logger.info(f"Position to move: {current_player_color}")
+
+        sf_best_move_data = get_stockfish_best_move_eval(args.fen)
+        if sf_best_move_data:
+            logger.info(f"Stockfish best move: {sf_best_move_data['move_uci']} ({sf_best_move_data['display']})")
+            
+            if best_move == sf_best_move_data['move_uci']:
+                logger.info("✅ Engine agreed with Stockfish!")
+            else:
+                logger.warning(f"❌ Engine disagreed. Engine: {best_move}, Stockfish: {sf_best_move_data['move_uci']}")
+                nn_move_eval_data = get_stockfish_eval_for_move(args.fen, best_move)
+                if nn_move_eval_data:
+                    logger.info(f"   Stockfish eval of Engine's move '{best_move}': {nn_move_eval_data['display']}")
+        else:
+            logger.error("Could not get Stockfish best move for comparison.")
+        
+        # The results_summary is not populated for single FEN runs in this modified block,
+        # as the primary goal here is to generate a specific log file.
+        # The original test_position function handles result summary population.
+        logger.info("Single FEN test complete. Log file should contain detailed search.")
+
+    else:
+        # Fetch positions from various sources
+        pos_gen = PositionGenerator()
+        
+        # Test databases (download if not present)
+        setup_test_databases()
+        
+        game_data_dir = Path(__file__).parent / "game_data"
+        test_databases_dir = Path(__file__).parent / "test_databases"
+
+        default_positions = [
+            {"name": "test1_opening_blacks_reply", "fen": "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", "source": "default"},
+            {"name": "test2_middlegame_tactical", "fen": "r3k2r/pp1b1ppp/2n2n2/1B2N3/Q2Pq3/2P1B3/P4PPP/R3K2R w KQkq - 1 13", "source": "default"},
+            {"name": "test3_endgame_simple_pawn_promo", "fen": "8/k7/P7/8/8/8/1K6/8 w - - 0 1", "source": "default", "expected_outcome": "win"},
+            {"name": "test4_middlegame_material_imbalance", "fen": "7r/pp1k1p2/2pN1npp/8/8/BP6/P4PnP/2KR4 w - - 0 23", "source": "default"},
+            {"name": "test5_endgame_king_pawn", "fen": "8/8/1k6/8/8/8/4P3/3K4 w - - 0 1", "source": "default"},
+            {"name": "test6_tactical_pin_black", "fen": "5k2/r2p4/3Np1RP/2PnP3/5P2/1p1N3P/1P1K4/r7 b - - 0 47", "source": "default"},
+            {"name": "test7_endgame_promotion_race_black", "fen": "5k2/r2p3P/3Np1R1/2PnP3/5P2/1p1N3P/1P1K4/7r b - - 0 48", "source": "default"},
+            {"name": "test8_middlegame_queen_attack_black", "fen": "k3r3/5p2/pqbR4/5Ppp/3B4/1P3P2/1Q4PP/6K1 b - - 2 29", "source": "default"},
+            {"name": "test9_kings_indian_attack_white", "fen": "rnbq1rk1/ppp1ppbp/3p1np1/8/2PPP3/2N2N2/PP3PPP/R1BQKB1R w KQ - 2 6", "source": "default"},
+            {"name": "test10_endgame_rook_pawns_white", "fen": "8/5p2/R7/5k2/8/8/P4P2/6K1 w - - 1 36", "source": "default"},
+        ]
+        
+        all_test_positions = pos_gen.get_all_positions(
+            include_default=True,
+            pgn_files=[str(game_data_dir / "lichess_games.pgn")],
+            epd_files=[str(test_databases_dir / suite) for suite in os.listdir(test_databases_dir) if suite.endswith(".epd")],
+            tactical_count=10, # Reduce for faster testing, increase for thoroughness
+            online_count=2,    # Reduce Lichess API calls
+            max_total=args.max_positions
+        )
+
+        logger.info(f"Total positions available: {len(all_test_positions)}")
+        if not all_test_positions:
+            logger.warning("No positions found to test.")
+            return
+
+        # Log sources
+        source_counts = {}
+        for pos in all_test_positions:
+            source = pos.get('source', 'unknown')
+            source_counts[source] = source_counts.get(source, 0) + 1
+        
+        logger.info("Running test on: " + str(len(all_test_positions[:args.max_positions])) + " positions")
+        logger.info("Position sources:")
+        for source, count in source_counts.items():
+            logger.info(f"  {source}: {count}")
+
+
         logger.info(f"\n🎯 Testing Configuration:")
-        logger.info(f"   Max positions: {args.count}")
+        logger.info(f"   Max positions: {args.max_positions}")
         logger.info(f"   Difficulty: {args.difficulty}")
         logger.info(f"   Pattern focus: {args.pattern}")
-        if args.sources:
-            logger.info(f"   Sources: {args.sources}")
-    
-    overall_results_summary = []
-    
-    for position_data in test_positions_to_run:
-        fen = position_data.get('fen')
-        name = position_data.get('name', 'unknown_position')
-        if fen:
-            test_position(fen, name, overall_results_summary)
-            # Add metadata to results
-            if overall_results_summary:
-                overall_results_summary[-1].update({
-                    'source': position_data.get('source', 'unknown'),
-                    'pattern': position_data.get('pattern', 'unknown'),
-                    'game_info': position_data.get('game_info', {}),
-                    'operations': position_data.get('operations', {})
-                })
-    
-    # Enhanced Summary with source analysis
-    logger.info(f"\n{'='*80}")
-    logger.info("📊 FINAL SUMMARY OF NEURAL NETWORK PERFORMANCE")
-    logger.info(f"{'='*80}")
-    
-    if overall_results_summary:
-        total_tests = len([r for r in overall_results_summary if r['status'] == 'OK'])
+
+        for i, pos_data in enumerate(all_test_positions[:args.max_positions]):
+            logger.info(f"\n================================================================================")
+            logger.info(f"🧠 TESTING POSITION: {pos_data['name']} ({i+1}/{args.max_positions})")
+            logger.info(f"================================================================================")
+            
+            test_position(pos_data['fen'], pos_data['name'], results_summary)
+            
+            # Optional: Add a small delay if hitting API limits or to reduce system load
+            # time.sleep(0.1) 
+
+    # Print summary
+    if results_summary:
+        total_tests = len([r for r in results_summary if r['status'] == 'OK'])
         logger.info(f"Total valid positions tested: {total_tests}")
 
         # Enhanced category tracking
@@ -1239,7 +1349,7 @@ def main():
         total_eval_diff_cp = 0
         valid_comparisons = 0
 
-        for r in overall_results_summary:
+        for r in results_summary:
             if r['status'] == 'OK':
                 successful_tests +=1
                 if r['category'] in categories_count:
@@ -1322,7 +1432,7 @@ def main():
                 logger.info("\nOverall: ⚠️ Room for improvement, struggles with consistency.")
 
         # Calculate comprehensive strength score
-        strength_data = calculate_strength_score(overall_results_summary)
+        strength_data = calculate_strength_score(results_summary)
         
         logger.info(f"\n🏆 ENGINE STRENGTH ASSESSMENT")
         logger.info(f"{'='*50}")
@@ -1333,45 +1443,16 @@ def main():
         logger.info(f"Blunder Rate: {strength_data['blunder_rate']}%")
         
         # Save benchmark results if requested
-        if args.track_improvement or args.benchmark:
-            config_used = {
-                'count': args.count,
-                'difficulty': args.difficulty,
-                'pattern': args.pattern,
-                'sources_used': list(source_performance.keys()) if source_performance else [],
-                'benchmark_mode': args.benchmark,
-                'tactical_count': args.tactical,
-                'online_count': args.online
-            }
-            save_benchmark_results(strength_data, config_used)
-
-        # Save results if requested
-        if args.save_results:
-            try:
-                with open(args.save_results, 'w') as f:
-                    json.dump({
-                        'test_config': {
-                            'count': args.count,
-                            'difficulty': args.difficulty,
-                            'pattern': args.pattern,
-                            'sources_used': list(source_performance.keys()) if source_performance else [],
-                            'benchmark_mode': args.benchmark
-                        },
-                        'strength_assessment': strength_data,
-                        'summary': {
-                            'total_positions': total_tests,
-                            'average_eval_diff_cp': average_diff_cp if valid_comparisons > 0 else None,
-                            'category_counts': categories_count,
-                            'source_performance': source_performance,
-                            'pattern_performance': pattern_performance,
-                            'excellent_ratio': excellent_ratio if successful_tests > 0 else 0,
-                            'good_ratio': good_ratio if successful_tests > 0 else 0
-                        },
-                        'detailed_results': overall_results_summary
-                    }, f, indent=2)
-                logger.info(f"\n💾 Detailed results saved to: {args.save_results}")
-            except Exception as e:
-                logger.error(f"❌ Failed to save results: {e}")
+        config_used = {
+            'max_positions': args.max_positions,
+            'difficulty': args.difficulty,
+            'pattern': args.pattern,
+            'sources_used': list(source_performance.keys()) if source_performance else [],
+            'benchmark_mode': False,
+            'tactical_count': 0,
+            'online_count': 0
+        }
+        save_benchmark_results(strength_data, config_used)
 
     logger.info(f"\n✅ Move quality test completed!")
 

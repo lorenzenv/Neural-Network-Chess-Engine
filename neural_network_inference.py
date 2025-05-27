@@ -141,25 +141,26 @@ class NeuralNetworkEvaluator:
             print(f"NN symmetry comparison error: {e}")
             return self.compare_two_positions(fen1, fen2)
     
-    def evaluate_position_against_reference(self, position_fen: str, reference_fen: str = None) -> float:
+    def evaluate_position_against_reference(self, position_fen: str, reference_fen: str, is_quiescence_standpat_log: bool = False) -> float:
         """
         Evaluate a position by comparing against a reference position.
         
-        🚨 PURE NN: Uses only starting position as universal reference OR parent FEN.
+        🚨 PURE NN: Uses only the provided reference_fen.
         No chess knowledge about what makes a "good" reference.
         MODIFIED: Terminal checks (checkmate, stalemate) are commented out.
+        MODIFIED: reference_fen is now a required parameter.
         """
         # 💡 Check cache (use position_fen and reference_fen as key)
-        cache_key = (position_fen, reference_fen) # reference_fen can be None
+        cache_key = (position_fen, reference_fen) # reference_fen can be None - NO, IT CANNOT BE NONE ANYMORE
         if cache_key in self.evaluation_cache:
             self.cache_hits += 1
             return self.evaluation_cache[cache_key]
 
-        _reference_fen = reference_fen
-        if _reference_fen is None:
+        # _reference_fen = reference_fen # No longer needed, directly use reference_fen
+        # if _reference_fen is None: # This block is removed
             # Use starting position as universal reference (learned in training)
             # This will be used for the root node of the search.
-            _reference_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            # _reference_fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
         
         try:
             # MODIFIED: Terminal checks removed/commented out
@@ -170,7 +171,7 @@ class NeuralNetworkEvaluator:
             #     return NeuralNetworkConfig.STALEMATE_SCORE
             
             # Pure NN comparison
-            comparison_score = self.compare_positions_with_symmetry(position_fen, _reference_fen)
+            comparison_score = self.compare_positions_with_symmetry(position_fen, reference_fen)
             
             # Convert comparison to evaluation score
             # NN output: >0.5 means position_fen is better for White than _reference_fen
@@ -181,63 +182,83 @@ class NeuralNetworkEvaluator:
             eval_score = max(NeuralNetworkConfig.MIN_SAFE_EVALUATION_BOUND, 
                            min(NeuralNetworkConfig.MAX_SAFE_EVALUATION_BOUND, eval_score))
             
+            if is_quiescence_standpat_log:
+                print(f"[DEBUG NNEval] evaluate_position_against_reference: pos_fen='{position_fen}', ref_fen='{reference_fen}', comp_score={comparison_score:.4f}, eval_score={eval_score:.2f}")
+
             # 💡 Store in cache
             self.evaluation_cache[cache_key] = eval_score
             self.cache_misses += 1
             return eval_score
             
         except Exception as e:
-            print(f"NN position evaluation error: {e} for FEN: {position_fen} vs REF: {_reference_fen}")
+            print(f"NN position evaluation error: {e} for FEN: {position_fen} vs REF: {reference_fen}")
             return 0.0
     
-    def evaluate_moves_for_ordering(self, current_fen: str, candidate_moves: list) -> dict:
+    def evaluate_moves_for_ordering(self, current_fen: str, candidate_moves: list, ply: int) -> dict:
         """
-        Evaluate candidate moves for ordering using pure NN inference.
-        Compares the resulting position of a move (parent) against the child position.
-        
-        🚨 PURE NN: No chess knowledge about move types, just NN scores.
-        FIXED: Compares parent to child with correct scoring interpretation.
+        Evaluates candidate moves for ordering using pure NN inference.
+        Compares the resulting position of a move (child) against the current/parent position.
+        Returns a dictionary mapping move to NN score.
+        The score represents P(parent_is_better_than_child_after_move).
+        A higher score means the child is worse from the parent's perspective.
+        For move ordering, we want to prioritize moves where the child is better for the current player.
         """
-        move_scores = {} # Stores {move: score_for_current_player}
+        move_scores = {} # Stores {move: ordering_score_for_current_player}
         
         if not candidate_moves:
             return move_scores
         
         try:
             board = chess.Board(current_fen)
-            is_white_turn = (board.turn == chess.WHITE)
+            is_white_turn = (board.turn == chess.WHITE) # Player whose turn it is in current_fen
             
+            # Only log for ply 0 for evaluate_moves_for_ordering to reduce noise
+            if ply == 0:
+                print(f"[DEBUG NNEval] evaluate_moves_for_ordering: Evaluating {len(candidate_moves)} moves. Parent_FEN for ordering: '{current_fen}', ply: {ply}")
+
             for move in candidate_moves:
                 try:
                     board.push(move)
-                    resulting_fen = board.fen()
-                    board.pop() # Backtrack
-                    
-                    # FIXED: Compare parent vs child (not child vs parent)
-                    # This gives us "is parent better than child" from White's perspective
+                    resulting_fen = board.fen() # This is the child FEN
+                    board.pop() # Backtrack to parent state for next iteration
+
+                    # raw_nn_score = P(parent_fen > resulting_fen)
+                    # If raw_nn_score is high (e.g., >0.5), parent is better than child.
+                    # If raw_nn_score is low (e.g., <0.5), child is better than parent.
                     raw_nn_score = self.compare_positions_with_symmetry(current_fen, resulting_fen)
                     
-                    ordering_score = 0.5
-                    if is_white_turn:
-                        # White wants HIGH raw scores (better for White)
-                        # Lower ordering score = higher priority
-                        ordering_score = 1.0 - raw_nn_score  
-                    else:
-                        # Black wants LOW raw scores (worse for White = better for Black)
-                        # Lower ordering score = higher priority
-                        ordering_score = raw_nn_score
+                    # Final revised logic: The NN output P(A > B) means A is better than B from *White's perspective*.
+                    # This is how Siamese networks are typically trained: output is P(pos1 better for White than pos2).
+                    # If current_fen is A, resulting_fen is B.
+                    # raw_nn_score = P(current_fen is better for White than resulting_fen)
                     
-                    move_scores[move] = ordering_score
+                    ordering_score_P_child_better_than_parent = 0.0 # Default
+
+                    if is_white_turn:
+                        # White wants resulting_fen to be better than current_fen.
+                        # This means P(current_fen > resulting_fen) should be LOW.
+                        # So, ordering_score = 1.0 - raw_nn_score. High score if raw_nn_score is low.
+                        ordering_score_P_child_better_than_parent = 1.0 - raw_nn_score
+                    else: # Black's turn
+                        # Black wants resulting_fen to be better than current_fen (for Black).
+                        # This means resulting_fen is WORSE for White than current_fen.
+                        # This means P(current_fen > resulting_fen) should be HIGH.
+                        # So, ordering_score = raw_nn_score. High score if raw_nn_score is high.
+                        ordering_score_P_child_better_than_parent = raw_nn_score
+                    
+                    move_scores[move] = ordering_score_P_child_better_than_parent
+                    
+                    # Only log for ply 0 for evaluate_moves_for_ordering to reduce noise
+                    if ply == 0:
+                        print(f"    [DEBUG NNEval MO] parent: '{current_fen}', move: {move}, child: '{resulting_fen}', P(parent>child_for_parent_player): {raw_nn_score:.4f}, ordering_score_P(child>parent_for_parent_player): {ordering_score_P_child_better_than_parent:.4f}")
 
                 except Exception as e:
-                    print(f"Error evaluating move {move} for ordering (FEN: {current_fen}): {e}")
-        
+                    print(f"Error processing move {move} for ordering: {e}")
+
         except Exception as e:
-            # This catches errors like invalid current_fen before move iteration.
             print(f"NN move ordering major error for FEN {current_fen}: {e}")
-            # Fallback: give all moves neutral score if the initial FEN or board setup fails.
-            for move_obj in candidate_moves: # Ensure we are iterating over the original list if board setup failed
-                move_scores[move_obj] = 0.5
+            for m in candidate_moves:
+                move_scores[m] = 0.5 # Neutral score for all if initial FEN fails
         
         return move_scores
 
@@ -269,7 +290,7 @@ if __name__ == "__main__":
     after_e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"
     
     comparison = evaluator.compare_two_positions(after_e4, starting_pos)
-    evaluation = evaluator.evaluate_position_against_reference(after_e4)
+    evaluation = evaluator.evaluate_position_against_reference(after_e4, starting_pos)
     
     print(f"NN Comparison (e4 vs start): {comparison:.3f}")
     print(f"NN Evaluation (e4): {evaluation:.1f}cp")
