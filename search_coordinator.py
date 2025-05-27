@@ -147,7 +147,7 @@ class SearchCoordinator:
     This class only handles search algorithm, not chess evaluation.
     """
     
-    def __init__(self, starting_fen: str = None):
+    def __init__(self, starting_fen: Optional[str] = None):
         # Initialize components
         self.nn_evaluator = NeuralNetworkEvaluator()
         self.move_orderer = MoveOrderer(self.nn_evaluator)
@@ -171,7 +171,7 @@ class SearchCoordinator:
         
         print("✅ Pure NN Search Coordinator initialized - ZERO chess knowledge!")
     
-    def get_best_move(self, current_board_fen: str, time_limit: float = None, search_depth: int = None) -> str | None:
+    def get_best_move(self, current_board_fen: str, time_limit: Optional[float] = None, search_depth: Optional[int] = None) -> Optional[str]:
         if time_limit is not None:
             self.time_limit_seconds = time_limit
         

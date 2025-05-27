@@ -528,7 +528,7 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Stockfish: {e}")
     sys.exit(1)
 
-def get_stockfish_eval_for_move(fen: str, move_uci: str) -> dict | None:
+def get_stockfish_eval_for_move(fen: str, move_uci: str) -> Optional[Dict]:
     """Gets Stockfish's evaluation for a specific FEN after a given move using search-based evaluation."""
     try:
         board = chess.Board(fen)
@@ -571,7 +571,7 @@ def get_stockfish_eval_for_move(fen: str, move_uci: str) -> dict | None:
         return None
 
 
-def get_stockfish_best_move_eval(fen: str) -> dict | None:
+def get_stockfish_best_move_eval(fen: str) -> Optional[Dict]:
     """Gets Stockfish's best move and its evaluation from the perspective of the player to move."""
     try:
         stockfish.set_fen_position(fen)
